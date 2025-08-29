@@ -1,0 +1,11 @@
+google-adk
+fastapi
+uvicorn[standard]
+browser-use==0.5.11
+pyinstaller
+mcp[cli]
+google-api-python-client
+google-auth-oauthlib
+python-dotenv
+python-multipart
+websockets

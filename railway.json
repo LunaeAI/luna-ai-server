@@ -1,0 +1,10 @@
+{
+    "build": {
+        "builder": "NIXPACKS"
+    },
+    "deploy": {
+        "startCommand": "python -m src.server",
+        "healthcheckPath": "/health",
+        "healthcheckTimeout": 300
+    }
+}
