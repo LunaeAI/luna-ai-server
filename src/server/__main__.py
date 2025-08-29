@@ -9,17 +9,52 @@ import asyncio
 import os
 from dotenv import load_dotenv
 
-# Configure logging for deployment
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('luna-server.log') if os.getenv('LOG_TO_FILE') else logging.NullHandler()
-    ]
-)
+# Import colorama for colorful logging
+import colorama
+from colorama import Fore, Style
 
+# Initialize colorama
+colorama.init(autoreset=True)
+
+class ColorFormatter(logging.Formatter):
+    """Custom formatter to add colors to log output"""
+    
+    def format(self, record):
+        # Get the original formatted message
+        formatted_message = super().format(record)
+        
+        # Color the time (grey)
+        time_str = f"[{record.asctime}]"
+        colored_time = f"{Fore.LIGHTBLACK_EX}{time_str}{Style.RESET_ALL}"
+        
+        # Color the level name
+        level_str = f"[{record.levelname}]"
+        if record.levelno >= logging.ERROR:
+            colored_level = f"{Fore.RED}{level_str}{Style.RESET_ALL}"
+        elif record.levelno >= logging.WARNING:
+            colored_level = f"{Fore.YELLOW}{level_str}{Style.RESET_ALL}"
+        elif record.levelno >= logging.INFO:
+            colored_level = f"{Fore.GREEN}{level_str}{Style.RESET_ALL}"
+        else:
+            colored_level = f"{Fore.BLUE}{level_str}{Style.RESET_ALL}"
+        
+        # Color the message (white)
+        message_str = record.getMessage()
+        colored_message = f"{Fore.WHITE}{message_str}{Style.RESET_ALL}"
+        
+        # Reconstruct the formatted string
+        return f"{colored_time} {colored_level} {colored_message}"
+
+# Configure logging for deployment
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Create console handler with color formatter
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(ColorFormatter('[%(asctime)s] [%(levelname)s] %(message)s'))
+
+# Add console handler
+logger.addHandler(console_handler)
 
 from .runner.websocket_server import WebSocketServer
 

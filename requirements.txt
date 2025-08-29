@@ -9,3 +9,4 @@ google-auth-oauthlib
 python-dotenv
 python-multipart
 websockets
+colorama

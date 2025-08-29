@@ -141,8 +141,6 @@ class WebSocketServer:
                 "active_clients": len(self.client_websockets),
                 "active_voice_sessions": sum(self.client_voice_sessions.values()),
                 "active_text_sessions": sum(self.client_text_sessions.values()),
-                "memory_usage": "N/A",  # Could add psutil for memory monitoring
-                "uptime": "N/A"  # Could add uptime tracking
             }
 
         @self.app.get("/metrics")

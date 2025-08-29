@@ -277,7 +277,7 @@ class AgentRunner:
                     continue
 
                 case "audio":
-                    # Skip logging audio chunks
+                    logger.info("[AGENT] Sending audio data")
                     await message_sender(event_result["websocket_message"])
 
                 case "status":
