@@ -137,10 +137,24 @@ class WebSocketServer:
         async def health_check():
             """Health check endpoint"""
             return {
-                "status": "healthy", 
+                "status": "healthy",
                 "active_clients": len(self.client_websockets),
                 "active_voice_sessions": sum(self.client_voice_sessions.values()),
-                "active_text_sessions": sum(self.client_text_sessions.values())
+                "active_text_sessions": sum(self.client_text_sessions.values()),
+                "memory_usage": "N/A",  # Could add psutil for memory monitoring
+                "uptime": "N/A"  # Could add uptime tracking
+            }
+
+        @self.app.get("/metrics")
+        async def metrics():
+            """Detailed metrics for monitoring"""
+            return {
+                "active_clients": len(self.client_websockets),
+                "active_voice_sessions": sum(self.client_voice_sessions.values()),
+                "active_text_sessions": sum(self.client_text_sessions.values()),
+                "total_sessions": len(self.client_voice_sessions) + len(self.client_text_sessions),
+                "websocket_connections": len(self.client_websockets),
+                "pending_voice_tasks": len(self.client_voice_tasks)
             }
 
     async def _handle_voice_session_start(self, client_id: str, websocket: WebSocket, message: dict):
