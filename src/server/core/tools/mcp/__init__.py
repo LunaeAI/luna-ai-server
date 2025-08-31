@@ -1,16 +1,62 @@
-from .filesystem import get_filesystem_mcp
-from .external import get_google_mcp
+import logging
+import os
+import sys
+from typing import List
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, StreamableHTTPConnectionParams, StdioConnectionParams, StdioServerParameters
 
-async def get_mcp_tools():
-    """Get all MCP tools, initializing filesystem tools dynamically"""
-    mcp_servers = []
+logger = logging.getLogger(__name__)
 
-    filesystem_tools = await get_filesystem_mcp()
-    if filesystem_tools:
-        mcp_servers.append(filesystem_tools)
+async def get_filesystem_mcp(client_id: str) -> MCPToolset | None:
+    """Get filesystem MCP toolset via proxy"""
+    try:
+        port = os.environ.get("PORT")
+        url = f"http://localhost:{port}/mcp/{client_id}/filesystem"
+        
+        logger.info(f"Connecting filesystem MCP via proxy: {url}")
+        
+        return MCPToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url=url,
+                timeout=10.0,
+                sse_read_timeout=30.0,
+                terminate_on_close=False
+            )
+        )
+    except Exception as e:
+        logger.error(f"Failed to configure filesystem MCP toolset: {e}")
+        return None
 
-    # google_mcp = await get_google_mcp()
-    # if google_mcp:
-    #     mcp_servers.append(google_mcp)
+async def get_google_workspace_mcp(client_id: str) -> MCPToolset | None:
+    """Get google workspace MCP toolset via proxy"""
+    try:
+        port = os.environ.get("PORT")
+        url = f"http://localhost:{port}/mcp/{client_id}/google"
+        
+        logger.info(f"Connecting google workspace MCP via proxy: {url}")
+        
+        return MCPToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url=url,
+                timeout=10.0,
+                sse_read_timeout=30.0,
+                terminate_on_close=False
+            )
+        )
+    except Exception as e:
+        logger.error(f"Failed to configure google workspace MCP toolset: {e}")
+        return None
 
-    return mcp_servers
+async def get_mcp_tools(client_id: str) -> List[MCPToolset]:
+    """Get all MCP tools for a client"""
+    tools = []
+    
+    filesystem_tool = await get_filesystem_mcp(client_id)
+    if filesystem_tool:
+        tools.append(filesystem_tool)
+    
+    google_tool = await get_google_workspace_mcp(client_id)
+
+    if google_tool:
+        tools.append(google_tool)
+    
+    return tools

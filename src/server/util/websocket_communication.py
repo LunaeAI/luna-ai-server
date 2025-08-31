@@ -15,18 +15,21 @@ logger = logging.getLogger(__name__)
 # Multi-client WebSocket state
 _client_websockets: Dict[str, WebSocket] = {}
 _client_pending_responses: Dict[str, Dict[str, asyncio.Future]] = {}
+_client_mcp_queues: Dict[str, asyncio.Queue] = {}
 
 def set_websocket_connection(client_id: str, websocket: WebSocket):
     """Set the WebSocket connection reference for a specific client"""
-    global _client_websockets, _client_pending_responses
+    global _client_websockets, _client_pending_responses, _client_mcp_queues
     _client_websockets[client_id] = websocket
     if client_id not in _client_pending_responses:
         _client_pending_responses[client_id] = {}
+    if client_id not in _client_mcp_queues:
+        _client_mcp_queues[client_id] = asyncio.Queue()
     logger.debug(f"WebSocket connection set for client {client_id}")
 
 def remove_websocket_connection(client_id: str):
     """Remove the WebSocket connection reference for a specific client"""
-    global _client_websockets, _client_pending_responses
+    global _client_websockets, _client_pending_responses, _client_mcp_queues
     if client_id in _client_websockets:
         del _client_websockets[client_id]
     if client_id in _client_pending_responses:
@@ -35,13 +38,25 @@ def remove_websocket_connection(client_id: str):
             if not future.done():
                 future.cancel()
         del _client_pending_responses[client_id]
+    if client_id in _client_mcp_queues:
+        del _client_mcp_queues[client_id]
     logger.debug(f"WebSocket connection removed for client {client_id}")
 
 def handle_websocket_response(client_id: str, response_data: Dict[str, Any]):
     """Handle incoming WebSocket response and resolve pending futures for a specific client"""
-    global _client_pending_responses
+    global _client_pending_responses, _client_mcp_queues
     
-    if client_id not in _client_pending_responses:
+    if client_id not in _client_pending_responses and client_id not in _client_mcp_queues:
+        return
+    
+    message_type = response_data.get("type", "")
+    
+    if message_type == "mcp_response":
+        logger.info(f"[WEBSOCKET] MCP response received for client {client_id}: {response_data}")
+        if client_id in _client_mcp_queues:
+            asyncio.create_task(_client_mcp_queues[client_id].put(response_data))
+        else:
+            logger.error(f"[WEBSOCKET] No MCP queue for client {client_id}")
         return
     
     request_id = response_data.get("request_id")
@@ -162,3 +177,8 @@ async def send_websocket_command(command_type: str, action: str, data: Optional[
             total_time = error_time - operation_start
             logger.error(f"[{client_id}] Fire-and-forget {action} ERROR after {total_time:.4f}s: {e}")
             return {"status": "error", "message": str(e)}
+
+def get_mcp_queue(client_id: str) -> Optional[asyncio.Queue]:
+    """Get the MCP response queue for a specific client"""
+    global _client_mcp_queues
+    return _client_mcp_queues.get(client_id)

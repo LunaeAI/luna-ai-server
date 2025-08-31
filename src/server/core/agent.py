@@ -6,12 +6,12 @@ from .tools import get_async_tools
 from .prompts import luna_prompt
 from .tools.callbacks import after_tool_callback
 
-async def get_agent_async(memories=None):
+async def get_agent_async(client_id: str, memories=None):
     """Creates an ADK Agent equipped with MCP tools and tool logging asynchronously"""
     
     load_dotenv()
     
-    all_tools = [google_search] + await get_async_tools()
+    all_tools = [google_search] + await get_async_tools(client_id)
     
     instruction = luna_prompt
     if memories and len(memories) > 0:
@@ -35,7 +35,7 @@ async def get_agent_async(memories=None):
     
     return agent
 
-async def get_text_agent_async(memories=None):
+async def get_text_agent_async(client_id: str, memories=None):
     """Creates text-only ADK Agent for overlay processing - raw LLM without tools"""
     
     load_dotenv()
