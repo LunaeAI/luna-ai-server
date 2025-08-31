@@ -14,47 +14,59 @@ import colorama
 from colorama import Fore, Style
 
 # Initialize colorama
-colorama.init(autoreset=True)
+colorama.init(autoreset=False)
 
 class ColorFormatter(logging.Formatter):
     """Custom formatter to add colors to log output"""
-    
+
     def format(self, record):
-        # Get the original formatted message
-        formatted_message = super().format(record)
-        
-        # Color the time (grey)
-        time_str = f"[{record.asctime}]"
-        colored_time = f"{Fore.LIGHTBLACK_EX}{time_str}{Style.RESET_ALL}"
-        
-        # Color the level name
-        level_str = f"[{record.levelname}]"
+        # Format time
+        time_str = self.formatTime(record, self.datefmt)
+
+        # Format level name with color
+        level_str = record.levelname
         if record.levelno >= logging.ERROR:
-            colored_level = f"{Fore.RED}{level_str}{Style.RESET_ALL}"
+            colored_level = f"{Fore.RED}[{level_str}]{Style.RESET_ALL}"
         elif record.levelno >= logging.WARNING:
-            colored_level = f"{Fore.YELLOW}{level_str}{Style.RESET_ALL}"
+            colored_level = f"{Fore.YELLOW}[{level_str}]{Style.RESET_ALL}"
         elif record.levelno >= logging.INFO:
-            colored_level = f"{Fore.GREEN}{level_str}{Style.RESET_ALL}"
+            colored_level = f"{Fore.GREEN}[{level_str}]{Style.RESET_ALL}"
         else:
-            colored_level = f"{Fore.BLUE}{level_str}{Style.RESET_ALL}"
-        
-        # Color the message (white)
+            colored_level = f"{Fore.BLUE}[{level_str}]{Style.RESET_ALL}"
+
+        # Format message with white color
         message_str = record.getMessage()
         colored_message = f"{Fore.WHITE}{message_str}{Style.RESET_ALL}"
-        
-        # Reconstruct the formatted string
+
+        # Format time with grey color
+        colored_time = f"{Fore.LIGHTBLACK_EX}[{time_str}]{Style.RESET_ALL}"
+
+        # Return fully formatted and colored log message
         return f"{colored_time} {colored_level} {colored_message}"
 
 # Configure logging for deployment
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[]  # Clear default handlers
+)
+
+# Get the root logger and configure it with our color formatter
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# Remove any existing handlers
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
 
 # Create console handler with color formatter
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(ColorFormatter('[%(asctime)s] [%(levelname)s] %(message)s'))
+console_handler.setFormatter(ColorFormatter())
 
-# Add console handler
-logger.addHandler(console_handler)
+# Add console handler to root logger
+root_logger.addHandler(console_handler)
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 from .runner.websocket_server import WebSocketServer
 
