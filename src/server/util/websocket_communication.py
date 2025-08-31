@@ -46,7 +46,13 @@ def handle_websocket_response(client_id: str, response_data: Dict[str, Any]):
     """Handle incoming WebSocket response and resolve pending futures for a specific client"""
     global _client_pending_responses, _client_mcp_queues
     
+    # Handle null response data gracefully
+    if response_data is None:
+        logger.error(f"[WEBSOCKET] Received null response data for client {client_id}")
+        return
+    
     if client_id not in _client_pending_responses and client_id not in _client_mcp_queues:
+        logger.warning(f"[WEBSOCKET] No pending responses or MCP queue for client {client_id}")
         return
     
     message_type = response_data.get("type", "")

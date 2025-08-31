@@ -107,9 +107,10 @@ class WebSocketServer:
                         break
                     except json.JSONDecodeError as e:
                         logger.error(f"[WEBSOCKET] Invalid JSON received from client {client_id}: {e}")
+                        continue  # Continue processing messages despite JSON errors
                     except Exception as e:
                         logger.error(f"[WEBSOCKET] Error processing message from client {client_id}: {e}")
-                        break
+                        continue  # Continue processing messages despite other errors
                         
             except Exception as e:
                 logger.error(f"[WEBSOCKET] Fatal error for client {client_id}: {e}")
@@ -164,11 +165,30 @@ class WebSocketServer:
             logger.info(f"[WEBSOCKET] Forwarding MCP request to client {client_id} for {mcp_name} with request_id {request_id}")
             await websocket.send_text(json.dumps(message))
             
-            # Wait for response
-            response_data = await get_mcp_queue(client_id).get()
-            result = response_data.get("data")
-            
-            return result
+            # Wait for response with timeout to prevent blocking
+            try:
+                response_data = await asyncio.wait_for(get_mcp_queue(client_id).get(), timeout=30.0)
+                
+                # Handle null or empty responses gracefully
+                if response_data is None:
+                    logger.warning(f"[WEBSOCKET] Received null response for MCP request {request_id}")
+                    return {"error": "No response received from client"}
+                
+                result = response_data.get("data")
+                
+                # Handle empty data in response
+                if result is None:
+                    logger.warning(f"[WEBSOCKET] Received empty data in MCP response for request {request_id}")
+                    return {"error": "Empty response data"}
+                
+                return result
+                
+            except asyncio.TimeoutError:
+                logger.error(f"[WEBSOCKET] Timeout waiting for MCP response for client {client_id}, request {request_id}")
+                return {"error": "Request timeout - no response from client"}
+            except Exception as e:
+                logger.error(f"[WEBSOCKET] Error processing MCP response for client {client_id}, request {request_id}: {e}")
+                return {"error": f"Internal error: {str(e)}"}
 
     async def _handle_voice_session_start(self, client_id: str, websocket: WebSocket, message: dict):
         """Start voice session with live streaming for a specific client"""
