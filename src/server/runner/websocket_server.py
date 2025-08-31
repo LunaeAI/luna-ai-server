@@ -154,6 +154,26 @@ class WebSocketServer:
             websocket = self.client_websockets[client_id]
             data = await request.json()
             
+            # Check if this is a notification-style request (fire and forget)
+            method = data.get("method", "")
+            if method.startswith("notification"):
+                # Fire and forget - send notification immediately without queuing
+                request_id = str(uuid.uuid4())
+                message = {
+                    "type": "mcp_request",
+                    "mcp_name": mcp_name,
+                    "data": data,
+                    "request_id": request_id
+                }
+                
+                logger.info(f"[WEBSOCKET] Firing MCP notification to client {client_id} for {mcp_name} with request_id {request_id}")
+                await websocket.send_text(json.dumps(message))
+                
+                # Return 202 Accepted for notifications (MCP client expects this for fire-and-forget)
+                from fastapi.responses import Response
+                return Response(status_code=202)
+            
+            # Handle regular request-response MCP calls
             request_id = str(uuid.uuid4())
             message = {
                 "type": "mcp_request",

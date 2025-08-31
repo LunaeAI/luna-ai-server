@@ -46,13 +46,13 @@ class ColorFormatter(logging.Formatter):
 
 # Configure logging for deployment
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.ERROR,
     handlers=[]  # Clear default handlers
 )
 
 # Get the root logger and configure it with our color formatter
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(logging.ERROR)
 
 # Remove any existing handlers
 for handler in root_logger.handlers[:]:
