@@ -10,10 +10,8 @@ from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.sessions import InMemorySessionService
 from google.adk.artifacts import InMemoryArtifactService
 from google.genai.types import Content, Modality, SpeechConfig, VoiceConfig, PrebuiltVoiceConfig, Part
-# Import async agent creation function from core module
 from ..core.agent import get_agent_async, get_text_agent_async
 
-# Application constants
 APP_NAME = "LUNA"
 
 logger = logging.getLogger(__name__)
@@ -123,7 +121,7 @@ class AgentRunner:
             }
         )
 
-        self.voice_agent = await get_agent_async(memories=memories)
+        self.voice_agent = await get_agent_async(self.client_id, memories=memories)
 
         self.voice_runner = Runner(
             app_name=APP_NAME,
@@ -148,7 +146,7 @@ class AgentRunner:
             }
         )
 
-        self.text_agent = await get_text_agent_async(memories=memories)
+        self.text_agent = await get_text_agent_async(self.client_id, memories=memories)
 
         self.text_runner = Runner(
             app_name=APP_NAME,

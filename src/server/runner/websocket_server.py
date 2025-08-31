@@ -8,11 +8,11 @@ import logging
 import os
 import uuid
 from typing import Dict
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 import uvicorn
 
 from google.genai.types import Blob
-from ..util.websocket_communication import set_websocket_connection, remove_websocket_connection, handle_websocket_response
+from ..util.websocket_communication import set_websocket_connection, remove_websocket_connection, handle_websocket_response, get_mcp_queue
 from .agent_runner import AgentRunner
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,16 @@ class WebSocketServer:
         """Generate a unique client ID"""
         return str(uuid.uuid4())
     
+    def _register_client(self, client_id: str, websocket: WebSocket):
+        """Register a new client"""
+        self.client_websockets[client_id] = websocket
+        self.client_runners[client_id] = AgentRunner(client_id)
+        self.client_voice_sessions[client_id] = False
+        self.client_text_sessions[client_id] = False
+        
+        # Provide websocket reference to util.py tools
+        set_websocket_connection(client_id, websocket)
+    
     def _setup_routes(self):
         """Set up WebSocket routes"""
         
@@ -62,22 +72,10 @@ class WebSocketServer:
             client_id = self._generate_client_id()
             
             # Register client
-            self.client_websockets[client_id] = websocket
-            self.client_runners[client_id] = AgentRunner(client_id)
-            self.client_voice_sessions[client_id] = False
-            self.client_text_sessions[client_id] = False
-            
-            # Provide websocket reference to util.py tools
-            set_websocket_connection(client_id, websocket)
+            self._register_client(client_id, websocket)
             
             try:
                 logger.info(f"[WEBSOCKET] Client {client_id} connected, waiting for session initialization...")
-                
-                # Send client ID to client (only for initial connection acknowledgment)
-                await websocket.send_text(json.dumps({
-                    "type": "client_registered",
-                    "status": "connected"
-                }))
                 
                 # Handle multiple session types in a loop
                 while True:
@@ -143,17 +141,34 @@ class WebSocketServer:
                 "active_text_sessions": sum(self.client_text_sessions.values()),
             }
 
-        @self.app.get("/metrics")
-        async def metrics():
-            """Detailed metrics for monitoring"""
-            return {
-                "active_clients": len(self.client_websockets),
-                "active_voice_sessions": sum(self.client_voice_sessions.values()),
-                "active_text_sessions": sum(self.client_text_sessions.values()),
-                "total_sessions": len(self.client_voice_sessions) + len(self.client_text_sessions),
-                "websocket_connections": len(self.client_websockets),
-                "pending_voice_tasks": len(self.client_voice_tasks)
+        @self.app.post("/mcp/{client_id}/{mcp_name}")
+        async def mcp_proxy(client_id: str, mcp_name: str, request: Request):
+            """Proxy MCP requests to clients"""
+            if client_id not in self.client_websockets:
+                raise HTTPException(status_code=404, detail="Client not connected")
+            
+            if mcp_name not in ["filesystem", "google"]:
+                raise HTTPException(status_code=400, detail="Unknown MCP name")
+            
+            websocket = self.client_websockets[client_id]
+            data = await request.json()
+            
+            request_id = str(uuid.uuid4())
+            message = {
+                "type": "mcp_request",
+                "mcp_name": mcp_name,
+                "data": data,
+                "request_id": request_id
             }
+            
+            logger.info(f"[WEBSOCKET] Forwarding MCP request to client {client_id} for {mcp_name} with request_id {request_id}")
+            await websocket.send_text(json.dumps(message))
+            
+            # Wait for response
+            response_data = await get_mcp_queue(client_id).get()
+            result = response_data.get("data")
+            
+            return result
 
     async def _handle_voice_session_start(self, client_id: str, websocket: WebSocket, message: dict):
         """Start voice session with live streaming for a specific client"""
@@ -410,7 +425,7 @@ class WebSocketServer:
     async def start_server(self, host: str = "0.0.0.0", port: int = None):
         """Start the FastAPI server with deployment-ready defaults"""
         if port is None:
-            port = int(os.environ.get("PORT", 8765))
+            port = int(os.environ.get("PORT"))
             
         logger.info(f"[WEBSOCKET] Starting server on {host}:{port}")
         

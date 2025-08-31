@@ -74,7 +74,7 @@ async def start_streaming_server_async():
         
         # Get configuration from environment variables for deployment
         host = os.getenv("HOST", "0.0.0.0")  # 0.0.0.0 for deployment
-        port = int(os.getenv("PORT", 8765))
+        port = int(os.getenv("PORT"))
         
         logger.info(f"Starting Luna AI Multi-Client Server on {host}:{port}")
         logger.info("Ready to accept multiple concurrent client connections")
