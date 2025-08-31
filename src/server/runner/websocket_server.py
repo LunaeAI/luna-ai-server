@@ -434,7 +434,8 @@ class WebSocketServer:
             host=host,
             port=port,
             log_level="info",
-            access_log=True,
+            log_config=None,  # Disable uvicorn's default logging
+            access_log=False,  # Disable access logging
             use_colors=False
         )
         server = uvicorn.Server(config)
