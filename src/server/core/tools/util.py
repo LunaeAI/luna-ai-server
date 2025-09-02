@@ -4,16 +4,12 @@ Utility tools for Luna AI Agent
 Core utility functions and tool coordination
 """
 
-from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 # Import tools from separate modules
 from .memory_tools import memory_tools
 from .reminder_tools import reminder_tools
 from .workspace_tools import workspace_tools
-from .browser_use import browser_tools
-# Import unified WebSocket communication functions
-from ...util.websocket_communication import set_websocket_connection, handle_websocket_response, send_websocket_command
 
 def get_current_datetime() -> str:
     """
@@ -79,4 +75,4 @@ util_tools = [
     get_current_datetime,
     stop_streaming,
     end_conversation_session,
-] + memory_tools + reminder_tools + workspace_tools + browser_tools
+] + memory_tools + reminder_tools + workspace_tools

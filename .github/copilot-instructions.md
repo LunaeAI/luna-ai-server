@@ -15,46 +15,105 @@ Luna AI is an Electron-based multimodal AI assistant that combines Google's ADK 
 - **Voice Detection**: Porcupine wake word detection ("LUNA")
 - **Memory System**: SQLite-based persistent memory with similarity search
 
-### Critical Async Architecture Pattern
-
-**The agent system uses a dual creation pattern that's essential for MCP integration:**
-
-```python
-# Async agent (required for MCP tools) - USE THIS for WebSocket server
-async def get_agent_async():
-    mcp_tools = await get_async_tools()  # MCP servers need async initialization
-    return Agent(
-        model="gemini-2.5-flash-live-preview",
-        tools=[google_search] + util_tools + mcp_tools,
-        after_tool_callback=after_tool_callback
-    )
-```
+### Critical Architecture Pattern
 
 ### Service Architecture
 
+Luna's architecture is split into two main components:
+
+#### SERVER (Python Backend)
+
+The Python server handles agent processing, a proxy server to connect to client-side running MCPs, and WebSocket streaming to facilitate server-client real-time communication:
+
 ```
-src/main/services/
-├── agent/                 # Python ADK integration
-│   ├── core/             # Core agent components
-│   │   ├── agent.py      # Agent creation (async pattern)
-│   │   ├── tools/        # Agent capabilities
-│   │   │   ├── util.py   # Core utility tools coordination
-│   │   │   ├── memory_tools.py    # Persistent memory management
-│   │   │   ├── workspace_tools.py # Workspace operations
-│   │   │   ├── reminder_tools.py  # Reminder functionality
-│   │   │   ├── browser_use.py     # Browser automation
-│   │   │   └── callbacks/         # Tool execution logging
-│   │   └── prompts/      # Agent system prompts
-│   ├── runner/           # ADK session management
-│   │   ├── websocket_server.py    # FastAPI WebSocket server (class-based)
-│   │   ├── agent_runner.py        # ADK event processing & session lifecycle
-│   │   └── __init__.py            # Runner package exports
-│   ├── util/             # Shared utilities
-│   └── __main__.py       # Entry point script
-├── streaming-server-service.js   # Node.js Python process manager
-├── user/                 # Settings, credentials, data
-└── events-service.js     # IPC communication hub
+├── agent/                     # Core Python ADK agent system
+│   ├── core/                 # Agent foundation components
+│   │   ├── agent.py          # Agent creation and lifecycle (async pattern)
+│   │   ├── tools/            # Agent capability modules
+│   │   │   ├── util.py       # Core utility tools coordination
+│   │   │   ├── memory_tools.py     # SQLite-based persistent memory
+│   │   │   ├── workspace_tools.py  # File system and workspace operations
+│   │   │   ├── reminder_tools.py   # Reminder and scheduling functionality
+│   │   │   ├── browser.py      # Browser automation and control
+│   │   │   └── callbacks/          # Tool execution logging and callbacks
+│   │   └── prompts/          # System prompts and agent instructions
+│   ├── runner/               # ADK session management
+│   │   ├── websocket_server.py     # FastAPI WebSocket server (class-based)
+│   │   ├── agent_runner.py          # ADK event processing & session lifecycle
+│   │   └── __init__.py              # Runner package exports
+│   ├── util/                 # Shared utilities and helpers
+│   └── __main__.py           # Entry point script (absolute imports)
+├── mcp/                      # Model Context Protocol servers
+│   ├── google/               # Google Workspace MCP server
+│   │   ├── mcp_server.py    # FastMCP-based Google API integration
+│   │   ├── get_credentials.py # OAuth2 authentication flow
+│   │   ├── requirements.txt  # Python dependencies
+│   │   └── GOOGLE_CLIENT_SECRETS.json # OAuth client configuration
+│   └── mcp.json             # MCP server configuration
+└── dist/                     # Compiled executables (PyInstaller)
+    └── luna-streaming-server.exe # Standalone Python server executable
 ```
+
+#### CLIENT (Electron Frontend)
+
+The Electron client provides the user interface and manages communication with the Python server:
+
+```
+├── main/                     # Electron main process
+│   ├── main.js              # Application entry point and lifecycle
+│   ├── services/            # Main process services
+│   │   ├── agent/           # Agent-related services
+│   │   │   ├── mcp-manager-service.js     # MCP server lifecycle management
+│   │   │   └── streaming-server-service.js # Python server process management
+│   │   ├── events-service.js              # IPC event handling
+│   │   ├── overlay/          # UI automation services
+│   │   └── user/            # User data services
+│   ├── tray/                # System tray integration
+│   ├── windows/             # Window management
+│   └── utils/               # Shared utilities
+├── renderer/                # Electron renderer processes
+│   ├── main/                # Main application window
+│   │   ├── components/      # React components
+│   │   ├── hooks/           # React hooks (useKeywordDetection, useConnection)
+│   │   ├── services/        # Client-side services
+│   │   └── pages/           # Application pages
+│   ├── orb/                 # Voice interaction window
+│   │   ├── services/        # StreamingService (audio/video/WebSocket). THIS IS VERY IMPORTANT: It serves as the main hub for the client's connection with the remote server.
+│   │   └── components/      # Orb-specific UI components
+│   └── overlay/             # Text-based overlay window
+│       └── services/        # Simplified StreamingService
+└── preload/                 # Electron preload scripts
+    └── preload.js           # Context bridge for IPC communication
+```
+
+__**This codebase is the SERVER.**__
+
+### Key Communication Flows
+
+1. **Wake Word → Agent Session**:
+
+    ```
+    Porcupine detects "LUNA" → useKeywordDetection.tsx → useConnection.tsx →
+    StreamingService → WebSocket → websocket_server.py → agent_runner.py → get_agent_async() → ADK Session
+    ```
+
+2. **Screen Sharing Integration**:
+
+    ```
+    Electron desktopCapturer → StreamingService → Base64 frames (1fps) →
+    WebSocket → websocket_server.py → ADK Live Request Queue
+    ```
+
+3. **MCP Tool Execution**:
+
+    ```
+    Agent Request → util.py → MCPManagerService → HTTP proxy → mcp_server.py → Google API → Response
+    ```
+
+4. **Memory Persistence**:
+    ```
+    Agent Tools → util.py memory functions → MemoryDatabase → SQLite storage → Similarity search with embeddings
+    ```
 
 ### Key Communication Flows
 

@@ -214,3 +214,18 @@ STRICT FORMATTING REQUIREMENTS:
     }
     
     return prompt, response_schema, system_instruction
+
+def create_prompt(memories: List[Dict[str, Any]]) -> str:
+    instruction = luna_prompt
+    
+    if memories and len(memories) > 0:
+        memory_context = "\n\nCONTEXT - STORED MEMORIES:\n"
+        memory_context += "You have access to the following memories from previous interactions. Use this context to provide more personalized and relevant assistance:\n"
+        for memory in memories:
+            confidence = memory.get('confidence', 0.0)
+            memory_text = memory.get('memory', '')
+            memory_context += f"- {memory_text} (confidence: {confidence:.2f})\n"
+        memory_context += "\nUse these memories to better understand the user's preferences and provide more relevant assistance.\n"
+        instruction = luna_prompt + memory_context
+
+    return instruction

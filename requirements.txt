@@ -1,7 +1,11 @@
-google-adk
+# Luna AI Server - Custom Requirements
+# Uses patched google-adk for performance optimization
+
+git+https://github.com/enxilium/adk-python.git@luna-ai-patches
+
+# Other dependencies
 fastapi
 uvicorn[standard]
-browser-use==0.5.11
 pyinstaller
 mcp[cli]
 google-api-python-client

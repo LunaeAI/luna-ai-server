@@ -9,21 +9,17 @@ import asyncio
 import os
 from dotenv import load_dotenv
 
-# Import colorama for colorful logging
 import colorama
 from colorama import Fore, Style
 
-# Initialize colorama
 colorama.init(autoreset=False)
 
 class ColorFormatter(logging.Formatter):
     """Custom formatter to add colors to log output"""
 
     def format(self, record):
-        # Format time
         time_str = self.formatTime(record, self.datefmt)
 
-        # Format level name with color
         level_str = record.levelname
         if record.levelno >= logging.ERROR:
             colored_level = f"{Fore.RED}[{level_str}]{Style.RESET_ALL}"
@@ -34,58 +30,42 @@ class ColorFormatter(logging.Formatter):
         else:
             colored_level = f"{Fore.BLUE}[{level_str}]{Style.RESET_ALL}"
 
-        # Format message with white color
         message_str = record.getMessage()
         colored_message = f"{Fore.WHITE}{message_str}{Style.RESET_ALL}"
 
-        # Format time with grey color
         colored_time = f"{Fore.LIGHTBLACK_EX}[{time_str}]{Style.RESET_ALL}"
 
-        # Return fully formatted and colored log message
         return f"{colored_time} {colored_level} {colored_message}"
 
 # Configure logging for deployment
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.INFO,
     handlers=[]  # Clear default handlers
 )
 
-# Get the root logger and configure it with our color formatter
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.ERROR)
+root_logger.setLevel(logging.INFO)
 
-# Remove any existing handlers
 for handler in root_logger.handlers[:]:
     root_logger.removeHandler(handler)
 
-# Create console handler with color formatter
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(ColorFormatter())
+console_handler.setFormatter(ColorFormatter(datefmt="%H:%M:%S"))
 
-# Add console handler to root logger
 root_logger.addHandler(console_handler)
 
-# Get logger for this module
 logger = logging.getLogger(__name__)
 
 from .runner.websocket_server import WebSocketServer
 
 load_dotenv()
 
-async def create_server():
-    """Create and configure the multi-client server"""
-    # Create WebSocketServer instance (no longer needs AgentRunner in constructor)
-    websocket_server = WebSocketServer()
-    
-    return websocket_server
-
 async def start_streaming_server_async():
     """Async method to start the server"""
     try:
-        streaming_server = await create_server()
+        streaming_server = WebSocketServer()
         
-        # Get configuration from environment variables for deployment
-        host = os.getenv("HOST", "0.0.0.0")  # 0.0.0.0 for deployment
+        host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT"))
         
         logger.info(f"Starting Luna AI Multi-Client Server on {host}:{port}")
