@@ -1,12 +1,9 @@
 from google.adk.agents import Agent
 from google.adk.tools import google_search
-from dotenv import load_dotenv
 
 from .tools import get_async_tools
 from .prompts import create_prompt
 from .tools.callbacks import after_tool_callback
-
-load_dotenv()
 
 async def get_agent_async(client_id: str, memories=None):
     """Creates an ADK Agent equipped with MCP tools and tool logging asynchronously"""

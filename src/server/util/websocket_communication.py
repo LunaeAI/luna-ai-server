@@ -110,8 +110,8 @@ async def send_websocket_command(command_type: str, action: str, data: Optional[
         "request_id": request_id
     }
 
-    # For 'list', 'search', and 'read' actions, wait for response
-    if action in ['list', 'search', 'read']:
+    # For 'list', 'search', 'read', and 'get' actions, wait for response
+    if action in ['list', 'search', 'read', 'get']:
         future = asyncio.Future()
         _client_pending_responses[client_id][request_id] = future
 
@@ -120,25 +120,15 @@ async def send_websocket_command(command_type: str, action: str, data: Optional[
             json_start = asyncio.get_event_loop().time()
             message_json = json.dumps(message)
             json_end = asyncio.get_event_loop().time()
-            json_time = json_end - json_start
-            logger.info(f"[{client_id}] JSON serialization took {json_time:.4f}s")
 
             # Time the WebSocket send
             send_start = asyncio.get_event_loop().time()
             await websocket.send_text(message_json)
             send_end = asyncio.get_event_loop().time()
-            send_time = send_end - send_start
-            logger.info(f"[{client_id}] WebSocket send took {send_time:.4f}s")
 
-            # Time the response wait
-            logger.info(f"[{client_id}] Waiting for response...")
             response = await asyncio.wait_for(future, timeout=15.0)
             response_received = asyncio.get_event_loop().time()
-            wait_time = response_received - send_end
             total_time = response_received - operation_start
-
-            logger.info(f"[{client_id}] Response received after {wait_time:.4f}s")
-            logger.info(f"[{client_id}] Total {action} operation took {total_time:.4f}s")
 
             return response
         except asyncio.TimeoutError:
@@ -165,7 +155,6 @@ async def send_websocket_command(command_type: str, action: str, data: Optional[
             message_json = json.dumps(message)
             json_end = asyncio.get_event_loop().time()
             json_time = json_end - json_start
-            logger.info(f"[{client_id}] JSON serialization took {json_time:.4f}s")
 
             # Time the WebSocket send
             send_start = asyncio.get_event_loop().time()
@@ -174,14 +163,10 @@ async def send_websocket_command(command_type: str, action: str, data: Optional[
             send_time = send_end - send_start
             total_time = send_end - operation_start
 
-            logger.info(f"[{client_id}] Fire-and-forget {action} send took {send_time:.4f}s")
-            logger.info(f"[{client_id}] Total {action} operation took {total_time:.4f}s")
-
             return {"status": "success"}
         except Exception as e:
             error_time = asyncio.get_event_loop().time()
             total_time = error_time - operation_start
-            logger.error(f"[{client_id}] Fire-and-forget {action} ERROR after {total_time:.4f}s: {e}")
             return {"status": "error", "message": str(e)}
 
 def get_mcp_queue(client_id: str) -> Optional[asyncio.Queue]:

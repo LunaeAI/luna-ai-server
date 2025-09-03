@@ -188,7 +188,7 @@ getServerScriptPath() {
 
 ### Error Handling Pattern
 
-You should NEVER implement any fallback mechanisms, and try-catch blocks should ONLY be used for non-deterministic cases, such as return values from an LLM or network connections.
+You should NEVER implement any fallback mechanisms, and try-catch blocks should ONLY be used for non-deterministic cases, such as return values from an LLM or network connections. Do NOT use try-catch blocks for deterministic code paths, as this can hide bugs and make the code harder to understand. This means that in general, there should be very few try-catch blocks in the codebase.
 
 ### Debugging
 
@@ -206,7 +206,7 @@ ALWAYS plan out tasks before executing them, using the SequentialThink tool.
 
 ### Libraries
 
-When working with external libraries and frameworks, ALWAYS consult the official documentation via Context7 for guidance on usage, best practices, and troubleshooting, prior to implementation. This applies to your thinking/planning steps as well.
+When working with ANY external libraries and frameworks, **ALWAYS** consult the official documentation via Context7 MCP for guidance on usage, best practices, and troubleshooting, prior to implementation. This applies to your thinking/planning steps as well.
 
 ## Required Scripts Order
 

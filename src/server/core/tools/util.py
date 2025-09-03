@@ -10,6 +10,7 @@ from datetime import datetime
 from .memory_tools import memory_tools
 from .reminder_tools import reminder_tools
 from .workspace_tools import workspace_tools
+from .browser_tools import browser_tools
 
 def get_current_datetime() -> str:
     """
@@ -75,4 +76,4 @@ util_tools = [
     get_current_datetime,
     stop_streaming,
     end_conversation_session,
-] + memory_tools + reminder_tools + workspace_tools
+] + memory_tools + reminder_tools + workspace_tools + browser_tools
