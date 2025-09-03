@@ -4,4 +4,22 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "browser-use>=0.7.1",
+    "colorama>=0.4.6",
+    "fastapi>=0.116.1",
+    "google-adk",
+    "google-api-python-client>=2.181.0",
+    "google-auth-oauthlib>=1.2.2",
+    "mcp[cli]>=1.13.1",
+    "playwright>=1.55.0",
+    "pyinstaller>=6.15.0",
+    "python-dotenv>=1.1.1",
+    "python-multipart>=0.0.20",
+    "stagehand>=0.5.2",
+    "uvicorn[standard]>=0.35.0",
+    "websockets>=15.0.1",
+]
+
+[tool.uv.sources]
+google-adk = { git = "https://github.com/enxilium/adk-python.git", rev = "luna-ai-patches" }

@@ -11,6 +11,7 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.artifacts import InMemoryArtifactService
 from google.genai.types import Content, Modality, SpeechConfig, VoiceConfig, PrebuiltVoiceConfig, Part
 from ..core.agent import get_agent_async, get_text_agent_async
+from ..core.tools.browser_tools import cleanup_all_browser_sessions
 
 APP_NAME = "LUNA"
 
@@ -223,6 +224,12 @@ class AgentRunner:
         """
         Ends the voice conversation and cleans up resources.
         """
+        # Clean up browser sessions first
+        try:
+            await cleanup_all_browser_sessions()
+        except Exception as e:
+            logger.error(f"Error cleaning up browser sessions: {e}")
+        
         if self.voice_session:
             await self.session_service.delete_session(
                 app_name=APP_NAME,
@@ -239,6 +246,12 @@ class AgentRunner:
         """
         Ends the text conversation and cleans up resources.
         """
+        # Clean up browser sessions first
+        try:
+            await cleanup_all_browser_sessions()
+        except Exception as e:
+            logger.error(f"Error cleaning up browser sessions: {e}")
+        
         if self.text_session:
             await self.session_service.delete_session(
                 app_name=APP_NAME,
@@ -275,7 +288,6 @@ class AgentRunner:
                     continue
 
                 case "audio":
-                    logger.info("[AGENT] Sending audio data")
                     await message_sender(event_result["websocket_message"])
 
                 case "status":
