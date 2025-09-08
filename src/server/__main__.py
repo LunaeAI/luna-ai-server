@@ -57,13 +57,53 @@ root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
 
 from .runner.websocket_server import WebSocketServer
+from ..database import init_database, close_database_connections
+from ..auth import auth_router
 
 load_dotenv()
+
+def validate_environment():
+    """Validate that all required environment variables are set"""
+    required_vars = {
+        "JWT_SECRET_KEY": "JWT secret key for token signing",
+        "DB_PASSWORD": "Database password",
+        "PORT": "Server port number"
+    }
+    
+    missing_vars = []
+    for var, description in required_vars.items():
+        if not os.getenv(var):
+            missing_vars.append(f"  {var}: {description}")
+    
+    if missing_vars:
+        logger.error("Missing required environment variables:")
+        for var in missing_vars:
+            logger.error(var)
+        logger.error("Please create a .env file based on .env.example")
+        raise ValueError("Missing required environment variables")
+    
+    # Validate JWT_SECRET_KEY length (should be at least 32 characters for security)
+    jwt_secret = os.getenv("JWT_SECRET_KEY")
+    if len(jwt_secret) < 32:
+        logger.error("JWT_SECRET_KEY must be at least 32 characters long for security")
+        raise ValueError("JWT_SECRET_KEY too short")
+    
+    logger.info("Environment validation passed")
 
 async def start_streaming_server_async():
     """Async method to start the server"""
     try:
+        # Validate environment variables first
+        validate_environment()
+        
+        # Initialize database
+        logger.info("Initializing database...")
+        await init_database()
+        
         streaming_server = WebSocketServer()
+        
+        # Include auth routes
+        streaming_server.app.include_router(auth_router)
         
         host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT"))
@@ -76,6 +116,12 @@ async def start_streaming_server_async():
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         sys.exit(1)
+    finally:
+        # Close database connections on shutdown
+        try:
+            await close_database_connections()
+        except Exception as e:
+            logger.error(f"Error closing database connections: {e}")
 
 def main():
     """Main entry point for the standalone server"""

@@ -7,13 +7,16 @@ import base64
 import logging
 import os
 import uuid
-from typing import Dict
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
+from typing import Dict, Optional
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Query
 import uvicorn
 
 from google.genai.types import Blob
 from ..util.websocket_communication import set_websocket_connection, remove_websocket_connection, handle_websocket_response, get_mcp_queue
 from .agent_runner import AgentRunner
+from ...auth import get_user_from_token
+from ...database import get_database_session, AgentUserContext
+from ...database.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ class WebSocketServer:
         # Multi-client connection tracking 
         self.client_websockets: Dict[str, WebSocket] = {}
         self.client_runners: Dict[str, AgentRunner] = {}
+        self.client_user_contexts: Dict[str, AgentUserContext] = {}  # Track minimal user context per client
         
         # Per-client session state tracking
         self.client_voice_sessions: Dict[str, bool] = {}
@@ -50,32 +54,61 @@ class WebSocketServer:
         """Generate a unique client ID"""
         return str(uuid.uuid4())
     
-    def _register_client(self, client_id: str, websocket: WebSocket):
-        """Register a new client"""
+    def _register_client(self, client_id: str, websocket: WebSocket, user: User):
+        """Register a new client with authenticated user"""
+        # Convert User to minimal AgentUserContext
+        user_context = user.to_agent_context()
+        
         self.client_websockets[client_id] = websocket
-        self.client_runners[client_id] = AgentRunner(client_id)
+        self.client_runners[client_id] = AgentRunner(client_id, user_context)
+        self.client_user_contexts[client_id] = user_context
         self.client_voice_sessions[client_id] = False
         self.client_text_sessions[client_id] = False
         
         # Provide websocket reference to util.py tools
         set_websocket_connection(client_id, websocket)
+        
+        logger.info(f"Client {client_id} registered with user context: {user_context}")
     
     def _setup_routes(self):
         """Set up WebSocket routes"""
         
         @self.app.websocket("/ws")
-        async def websocket_endpoint(websocket: WebSocket):
-            """Main WebSocket endpoint for both voice and text sessions"""
-            await websocket.accept()
+        async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
+            """Main WebSocket endpoint for both voice and text sessions - requires JWT authentication"""
             
-            # Generate unique client ID
-            client_id = self._generate_client_id()
-            
-            # Register client
-            self._register_client(client_id, websocket)
+            # Authenticate user before accepting WebSocket connection
+            from ...database.connection import get_session_factory
+            SessionLocal = get_session_factory()
+            db = SessionLocal()
             
             try:
-                logger.info(f"[WEBSOCKET] Client {client_id} connected, waiting for session initialization...")
+                # Validate JWT token
+                user = await get_user_from_token(db, token)
+                if not user:
+                    await websocket.close(code=4001, reason="Invalid or expired token")
+                    return
+                
+                # Accept WebSocket connection after successful authentication
+                await websocket.accept()
+                
+                # Generate unique client ID
+                client_id = self._generate_client_id()
+                
+                # Register client with user context
+                self._register_client(client_id, websocket, user)
+                
+                logger.info(f"[WEBSOCKET] Authenticated client {client_id} connected for user {user.username}")
+                
+            except Exception as e:
+                logger.error(f"[WEBSOCKET] Authentication error: {e}")
+                await websocket.close(code=4001, reason="Authentication failed")
+                return
+            finally:
+                db.close()
+            
+            try:
+                logger.info(f"[WEBSOCKET] Client {client_id} ready, waiting for session initialization...")
                 
                 # Handle multiple session types in a loop
                 while True:
@@ -449,6 +482,8 @@ class WebSocketServer:
                 del self.client_websockets[client_id]
             if client_id in self.client_runners:
                 del self.client_runners[client_id]
+            if client_id in self.client_user_contexts:
+                del self.client_user_contexts[client_id]
             if client_id in self.client_voice_sessions:
                 del self.client_voice_sessions[client_id]
             if client_id in self.client_text_sessions:

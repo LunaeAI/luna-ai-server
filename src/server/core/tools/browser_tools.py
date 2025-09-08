@@ -9,7 +9,7 @@ import os
 import asyncio
 import logging
 import base64
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 from browserbase import Browserbase
 from browser_use.llm import ChatGoogle
@@ -17,7 +17,7 @@ from browser_use import Agent, BrowserProfile, BrowserSession, Controller, Actio
 from google.genai import Client
 from google.genai import types as genai_types
 from google.adk.tools import ToolContext
-from uuid import UUID, uuid4
+from uuid import uuid4
 from playwright.async_api import async_playwright
 from ...util.websocket_communication import send_websocket_command
 
