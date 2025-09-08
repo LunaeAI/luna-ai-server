@@ -12,6 +12,7 @@ from google.adk.artifacts import InMemoryArtifactService
 from google.genai.types import Content, Modality, SpeechConfig, VoiceConfig, PrebuiltVoiceConfig, Part
 from ..core.agent import get_agent_async, get_text_agent_async
 from ..core.tools.browser_tools import cleanup_all_browser_sessions
+from ...database.models import AgentUserContext
 
 APP_NAME = "LUNA"
 
@@ -22,9 +23,10 @@ class AgentRunner:
     Handles agent creation, session management, and ADK event processing for dual voice/text sessions.
     """
     
-    def __init__(self, client_id: str):
-        """Initialize AgentRunner for a specific client."""
+    def __init__(self, client_id: str, user_context: Optional[AgentUserContext] = None):
+        """Initialize AgentRunner for a specific client with user context."""
         self.client_id = client_id
+        self.user_context = user_context
         
         # Shared services
         self.session_service = InMemorySessionService()
@@ -61,7 +63,18 @@ class AgentRunner:
         # Flag to track when end_conversation_session tool has been called
         self.pendingClose = False
         
-        logger.info(f"AgentRunner initialized for client {client_id}")
+        user_info = f" for user {user_context}" if user_context else ""
+        logger.info(f"AgentRunner initialized for client {client_id}{user_info}")
+    
+    def get_user_info_for_logging(self) -> str:
+        """Get user context info for logging purposes"""
+        if self.user_context:
+            return f"{self.user_context.username} (ID: {self.user_context.user_id}, Tier: {self.user_context.tier})"
+        return "unknown user"
+    
+    def get_user_context(self) -> Optional[AgentUserContext]:
+        """Get the user context for this agent session"""
+        return self.user_context
     
     async def start_voice_conversation(self, initial_message: Optional[str] = None, memories=None) -> Tuple:
         """
@@ -71,7 +84,8 @@ class AgentRunner:
         if self.voice_session is not None:
             raise RuntimeError("Voice session already active")
             
-        logger.info(f"[CLIENT:{self.client_id}] Starting voice conversation session")
+        user_info = self.get_user_info_for_logging()
+        logger.info(f"[CLIENT:{self.client_id}] Starting voice conversation session for {user_info}")
 
         await self._initialize_voice(memories=memories)
 

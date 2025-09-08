@@ -4,6 +4,7 @@ Utility tools for Luna AI Agent
 Core utility functions and tool coordination
 """
 
+import logging
 from datetime import datetime
 
 # Import tools from separate modules
@@ -11,6 +12,8 @@ from .memory_tools import memory_tools
 from .reminder_tools import reminder_tools
 from .workspace_tools import workspace_tools
 from .browser_tools import browser_tools
+
+logger = logging.getLogger(__name__)
 
 def get_current_datetime() -> str:
     """

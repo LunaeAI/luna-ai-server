@@ -13,7 +13,7 @@ Luna AI is an Electron-based multimodal AI assistant that combines Google's ADK 
 - **Build System**: Webpack + Electron Forge
 - **AI Models**: Gemini 2.5 Flash with live preview capabilities
 - **Voice Detection**: Porcupine wake word detection ("LUNA")
-- **Memory System**: SQLite-based persistent memory with similarity search
+- **Memory System**: Persistent memory locally on the client-side using SQLite and vector embeddings
 
 ### Critical Architecture Pattern
 
@@ -31,7 +31,7 @@ The Python server handles agent processing, a proxy server to connect to client-
 │   │   ├── agent.py          # Agent creation and lifecycle (async pattern)
 │   │   ├── tools/            # Agent capability modules
 │   │   │   ├── util.py       # Core utility tools coordination
-│   │   │   ├── memory_tools.py     # SQLite-based persistent memory
+│   │   │   ├── memory_tools.py     # Handles sending memory and retrieving memory from client side database
 │   │   │   ├── workspace_tools.py  # File system and workspace operations
 │   │   │   ├── reminder_tools.py   # Reminder and scheduling functionality
 │   │   │   ├── browser.py      # Browser automation and control
@@ -112,7 +112,7 @@ __**This codebase is the SERVER.**__
 
 4. **Memory Persistence**:
     ```
-    Agent Tools → util.py memory functions → MemoryDatabase → SQLite storage → Similarity search with embeddings
+    Agent Tools → memory tools back to client → Electron client via Websocket → user-side local keytar storage
     ```
 
 ### Key Communication Flows
@@ -133,7 +133,7 @@ __**This codebase is the SERVER.**__
 
 3. **Memory Persistence**:
     ```
-    Agent Tools → util.py memory functions → MemoryDatabase → SQLite storage →
+    Agent Tools → WebSocket Connection → Client-side local MemoryDatabase → 
     Similarity search with embeddings for context retrieval
     ```
 
@@ -231,33 +231,6 @@ When working with ANY external libraries and frameworks, **ALWAYS** consult the 
 1. **Never use `root_agent` in WebSocket server** - only `await get_agent_async()`
 2. **Python import handling** All paths should be RELATIVE, with the exception of `__main__.py` which serves as the entry script to start the server. This file MUST have absolute imports instead.
 3. **Video frame throttling** - WebSocket server limits to 5fps to prevent queue buildup
-
-## Testing Integration Points
-
-- WebSocket health check: `http://localhost:8765/health`
-- Audio pipeline: Verify `AudioWorkletStreaming` initialization
-
-## Memory System Architecture
-
-**Persistent SQLite memory with similarity search capabilities:**
-
-```python
-# Memory tools pattern in util.py
-def search_memory(query: str):
-    """Search through persistent memories using similarity matching"""
-    memories = memory_db.search_similar_memories(query, min_confidence=0.3)
-
-def save_memory(text: str):
-    """Save important information for future conversations"""
-    memory_id = memory_db.add_memory(memory=text, confidence=0.5)
-```
-
-**Memory database handles:**
-
-- User preferences and context retention
-- Tool execution logging via callbacks
-- Automatic memory reinforcement/weakening based on usage
-- Semantic search with embeddings for relevant context retrieval
 
 ## Frontend Hook Patterns
 
