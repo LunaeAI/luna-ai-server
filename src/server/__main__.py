@@ -66,14 +66,17 @@ def validate_environment():
     """Validate that all required environment variables are set"""
     required_vars = {
         "JWT_SECRET_KEY": "JWT secret key for token signing",
-        "DB_PASSWORD": "Database password",
-        "PORT": "Server port number"
+        "DB_PASSWORD": "Database password"
     }
     
     missing_vars = []
     for var, description in required_vars.items():
         if not os.getenv(var):
             missing_vars.append(f"  {var}: {description}")
+    
+    # Check for PORT but don't require it (Cloud Run provides this automatically)
+    if not os.getenv("PORT"):
+        logger.warning("PORT not set in environment, using default 8080")
     
     if missing_vars:
         logger.error("Missing required environment variables:")
@@ -106,7 +109,7 @@ async def start_streaming_server_async():
         streaming_server.app.include_router(auth_router)
         
         host = os.getenv("HOST", "0.0.0.0")
-        port = int(os.getenv("PORT"))
+        port = int(os.getenv("PORT", "8080"))
         
         logger.info(f"Starting Luna AI Multi-Client Server on {host}:{port}")
         logger.info("Ready to accept multiple concurrent client connections")

@@ -26,7 +26,7 @@ def get_database_url() -> str:
         Database URL string for PostgreSQL connection
         
     Environment Variables:
-        DB_HOST: Database host (default: localhost)
+        DB_HOST: Database host (default: localhost, or Cloud SQL socket path)
         DB_PORT: Database port (default: 5432) 
         DB_NAME: Database name (default: luna_db)
         DB_USER: Database username (default: luna_user)
@@ -41,7 +41,13 @@ def get_database_url() -> str:
     if not password:
         raise ValueError("DB_PASSWORD environment variable is required")
     
-    return f"postgresql://{username}:{password}@{host}:{port}/{database}"
+    # Check if this is a Cloud SQL Unix socket path
+    if host.startswith("/cloudsql/"):
+        # For Cloud SQL, use Unix socket connection
+        return f"postgresql://{username}:{password}@/{database}?host={host}"
+    else:
+        # For standard TCP connection
+        return f"postgresql://{username}:{password}@{host}:{port}/{database}"
 
 def get_database_engine() -> Engine:
     """
@@ -59,6 +65,9 @@ def get_database_engine() -> Engine:
             echo=os.getenv("DB_ECHO", "false").lower() == "true",  # Enable SQL logging if DB_ECHO=true
             pool_pre_ping=True,  # Verify connections before use
             pool_recycle=3600,   # Recycle connections every hour
+            pool_size=5,         # Smaller pool for cloud efficiency
+            max_overflow=10,     # Allow overflow connections
+            pool_timeout=30,     # Connection timeout
         )
         logger.info("Database engine created successfully")
     

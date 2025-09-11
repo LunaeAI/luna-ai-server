@@ -16,3 +16,5 @@ websockets
 colorama
 browser-use
 playwright
+browserbase
+jwt

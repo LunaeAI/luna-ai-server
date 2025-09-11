@@ -1,7 +1,6 @@
-# Use Python 3.12 slim image
+# Dockerfile optimized for Google Cloud deployment with Generative AI API
 FROM python:3.12-slim
 
-# Set working directory
 WORKDIR /app
 
 # Set environment variables
@@ -13,11 +12,11 @@ ENV PORT=8080
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
-    git \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy requirements and install dependencies
 COPY requirements.txt pyproject.toml uv.lock ./
 
 # Install uv for faster dependency resolution
@@ -29,12 +28,15 @@ RUN uv sync --frozen --no-dev
 # Copy source code
 COPY . .
 
-# Expose port
-EXPOSE 8080
+# Create non-root user for security
+RUN adduser --disabled-password --gecos "" luna_user && \
+    chown -R luna_user:luna_user /app
 
-# Health check
+USER luna_user
+
+# Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:$PORT/health || exit 1
 
 # Run the application
 CMD ["uv", "run", "python", "-m", "src.server"]
