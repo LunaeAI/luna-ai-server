@@ -13,9 +13,9 @@ async def get_agent_async(client_id: str, memories=None):
         name="luna",
         model="gemini-2.5-flash-live-preview",
         description="A multimodal AI agent that can monitor video streams, answer questions, provide information, and assist with various tasks including UI automation. Has persistent memory capabilities and learns from usage patterns to provide proactive suggestions.",
-        instruction="You are a helpful desktop voice assistant named Luna.",
+        instruction=create_prompt(memories),
         tools=all_tools,
-        # after_tool_callback=after_tool_callback
+        after_tool_callback=after_tool_callback
     )
     
     return agent

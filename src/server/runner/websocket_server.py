@@ -10,6 +10,7 @@ import uuid
 from typing import Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Query
 import uvicorn
+import httpx
 
 from google.genai.types import Blob
 from ..util.websocket_communication import set_websocket_connection, remove_websocket_connection, handle_websocket_response, get_mcp_queue
@@ -68,7 +69,19 @@ class WebSocketServer:
         # Provide websocket reference to util.py tools
         set_websocket_connection(client_id, websocket)
         
+        # Pre-initialize voice agent and warm up MCP connections immediately
+        asyncio.create_task(self._pre_initialize_agent(client_id))
+        
         logger.info(f"Client {client_id} registered with user context: {user_context}")
+
+    async def _pre_initialize_agent(self, client_id: str):
+        """Pre-initialize agent and warm up MCP connections for instant session starts"""
+        try:
+            agent_runner = self.client_runners[client_id]
+            await agent_runner._initialize_voice()  # This includes MCP warming
+            logger.info(f"[WEBSOCKET] Pre-initialized voice agent for client {client_id} - ready for instant session start")
+        except Exception as e:
+            logger.error(f"[WEBSOCKET] Failed to pre-initialize agent for client {client_id}: {e}")
     
     def _setup_routes(self):
         """Set up WebSocket routes"""
@@ -160,6 +173,7 @@ class WebSocketServer:
                 "active_clients": len(self.client_websockets),
                 "endpoints": {
                     "health": "/health",
+                    "weather": "/weather?city={city_name}",
                     "websocket": "/ws"
                 },
                 "description": "Multi-client WebSocket server for Luna AI agent communication"
@@ -174,6 +188,38 @@ class WebSocketServer:
                 "active_voice_sessions": sum(self.client_voice_sessions.values()),
                 "active_text_sessions": sum(self.client_text_sessions.values()),
             }
+
+        @self.app.get("/weather")
+        async def get_weather(city: str = Query(..., description="City name to get weather for")):
+            """Get weather data for a specified city using OpenWeatherMap API"""
+            try:
+                # Get API key from environment
+                api_key = os.getenv("WEATHERAPI_KEY")
+                if not api_key:
+                    raise HTTPException(status_code=500, detail="Weather API key not configured")
+                
+                # Make request to OpenWeatherMap API
+                url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url)
+                    
+                    if response.status_code == 200:
+                        weather_data = response.json()
+                        return weather_data
+                    elif response.status_code == 401:
+                        raise HTTPException(status_code=500, detail="Invalid API key")
+                    elif response.status_code == 404:
+                        raise HTTPException(status_code=404, detail=f"City '{city}' not found")
+                    else:
+                        raise HTTPException(status_code=500, detail="Weather service temporarily unavailable")
+                        
+            except httpx.RequestError as e:
+                logger.error(f"Weather API request failed: {e}")
+                raise HTTPException(status_code=500, detail="Failed to connect to weather service")
+            except Exception as e:
+                logger.error(f"Weather endpoint error: {e}")
+                raise HTTPException(status_code=500, detail="Internal server error")
 
         @self.app.post("/mcp/{client_id}/{mcp_name}")
         async def mcp_proxy(client_id: str, mcp_name: str, request: Request):

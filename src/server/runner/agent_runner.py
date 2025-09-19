@@ -37,6 +37,7 @@ class AgentRunner:
         self.voice_agent = None
         self.voice_runner = None
         self.voice_live_request_queue = None
+        self.voice_prepared_request = None  # Pre-warmed LLM request
         
         # Text agent components (new)
         self.text_session = None
@@ -91,12 +92,8 @@ class AgentRunner:
 
         logger.info(f"[CLIENT:{self.client_id}] Created voice session {self.voice_session.id} for user {self.client_id}")
         
-        live_events = self.voice_runner.run_live(
-            user_id=self.client_id,
-            session_id=self.voice_session.id,
-            live_request_queue=self.voice_live_request_queue,
-            run_config=self.runConfig,
-        )
+        # Use optimized run_live with pre-warmed MCP connections
+        live_events = self._run_live_optimized()
 
         # If initial_message provided, send it immediately after session setup
         if initial_message:
@@ -109,6 +106,24 @@ class AgentRunner:
             )
 
         return live_events, self.voice_live_request_queue
+
+    async def _run_live_optimized(self):
+        """Run live conversation with pre-warmed MCP connections for instant startup"""
+        from google.adk.agents.invocation_context import InvocationContext
+        
+        # Create live invocation context
+        invocation_context = InvocationContext(
+            artifact_service=self.artifact_service,
+            session_service=self.session_service,
+            invocation_id=f"live_{self.client_id}",
+            agent=self.voice_agent,
+            session=self.voice_session,
+            live_request_queue=self.voice_live_request_queue,
+            run_config=self.runConfig,
+        )
+        
+        # Use the pre-warmed LLM request for instant startup
+        return self.voice_agent._llm_flow.run_live(invocation_context, self.voice_prepared_request)
 
     async def start_text_conversation(self, memories=None):
         """Start text session for simple request/response processing"""
@@ -146,6 +161,26 @@ class AgentRunner:
         )
         
         self.voice_live_request_queue = LiveRequestQueue()
+        
+        # Pre-warm MCP connections for instant live startup
+        await self._warm_up_mcp_connections()
+
+    async def _warm_up_mcp_connections(self):
+        """Pre-connects to all MCP servers and prepares LLM request for instant live startup"""
+        from google.adk.agents.invocation_context import InvocationContext
+        
+        # Create a temporary invocation context for preprocessing
+        temp_context = InvocationContext(
+            artifact_service=self.artifact_service,
+            session_service=self.session_service,
+            invocation_id="temp_preprocessing",
+            agent=self.voice_agent,
+            session=self.voice_session,
+            run_config=self.runConfig,
+        )
+        
+        # Pre-prepare the LLM request with all MCP connections established
+        self.voice_prepared_request = await self.voice_agent._llm_flow.prepare_for_live_connection(temp_context)
 
     async def _initialize_text(self, memories=None):
         """Initialize text agent and session"""
@@ -254,6 +289,7 @@ class AgentRunner:
             self.voice_agent = None
             self.voice_runner = None
             self.voice_live_request_queue = None
+            self.voice_prepared_request = None
             logger.info(f"[CLIENT:{self.client_id}] Voice session ended")
 
     async def end_text_conversation(self):

@@ -7,6 +7,7 @@ set -e
 export REGION="us-central1" 
 export SERVICE_NAME="luna-ai-server"
 export DB_INSTANCE_NAME="luna-db-instance"
+export PROJECT_ID=$(gcloud config get-value project)
 
 # Colors for output
 RED='\033[0;31m'
@@ -38,6 +39,7 @@ gcloud secrets create jwt-secret --data-file=<(echo -n "$JWT_SECRET_KEY") || ech
 gcloud secrets create notion-token --data-file=<(echo -n "$NOTION_TOKEN") || echo "Secret already exists"
 gcloud secrets create db-password --data-file=<(echo -n "$DB_PASSWORD") || echo "Secret already exists"
 gcloud secrets create browserbase-api-key --data-file=<(echo -n "$BROWSERBASE_API_KEY") || echo "Secret already exists"
+gcloud secrets create weather-api-key --data-file=<(echo -n "$WEATHERAPI_KEY") || echo "Secret already exists"
 
 # Create PostgreSQL instance with MINIMAL configuration for alpha testing
 echo -e "${YELLOW}🗄️  Creating minimal Cloud SQL instance for alpha...${NC}"
@@ -52,7 +54,7 @@ gcloud sql instances create $DB_INSTANCE_NAME \
     --maintenance-window-day=SUN \
     --maintenance-window-hour=4 \
     --authorized-networks=0.0.0.0/0 \
-    --deletion-protection=false || echo "Database instance already exists"
+    --deletion-protection || echo "Database instance already exists"
 
 # Create database and user
 gcloud sql databases create luna_db --instance=$DB_INSTANCE_NAME || echo "Database already exists"
@@ -66,7 +68,6 @@ echo -e "${YELLOW}🐳 Building and deploying to Cloud Run with BUDGET OPTIMIZAT
 # Deploy to Cloud Run with minimal resource allocation
 gcloud run deploy $SERVICE_NAME \
     --source . \
-    --dockerfile Dockerfile.cloud \
     --platform managed \
     --region $REGION \
     --project $PROJECT_ID \
@@ -88,6 +89,7 @@ gcloud run deploy $SERVICE_NAME \
     --set-secrets NOTION_TOKEN=notion-token:latest \
     --set-secrets DB_PASSWORD=db-password:latest \
     --set-secrets BROWSERBASE_API_KEY=browserbase-api-key:latest \
+    --set-secrets WEATHERAPI_KEY=weather-api-key:latest \
     --memory 1Gi \
     --cpu 1 \
     --timeout 3600 \
