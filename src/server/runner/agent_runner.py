@@ -44,7 +44,6 @@ class AgentRunner:
         self.text_agent = None
         self.text_runner = None
         
-        self.live_request_queue = LiveRequestQueue()
         # Set response modality (AUDIO for Luna) - matching old commit pattern
         modality = [Modality.AUDIO]
         self.runConfig = RunConfig(
@@ -82,13 +81,12 @@ class AgentRunner:
         Begins a voice conversation and returns (live_events, live_request_queue)
         If initial_message is provided, it will be sent automatically after session setup
         """
-        if self.voice_session is not None:
-            raise RuntimeError("Voice session already active")
-            
         user_info = self.get_user_info_for_logging()
         logger.info(f"[CLIENT:{self.client_id}] Starting voice conversation session for {user_info}")
 
-        await self._initialize_voice(memories=memories)
+        # DON'T re-initialize if already done during pre-warming
+        if self.voice_session is None:
+            await self._initialize_voice(memories=memories)
 
         logger.info(f"[CLIENT:{self.client_id}] Created voice session {self.voice_session.id} for user {self.client_id}")
         
@@ -107,7 +105,7 @@ class AgentRunner:
 
         return live_events, self.voice_live_request_queue
 
-    async def _run_live_optimized(self):
+    def _run_live_optimized(self):
         """Run live conversation with pre-warmed MCP connections for instant startup"""
         from google.adk.agents.invocation_context import InvocationContext
         
@@ -122,8 +120,9 @@ class AgentRunner:
             run_config=self.runConfig,
         )
         
-        # Use the pre-warmed LLM request for instant startup
-        return self.voice_agent._llm_flow.run_live(invocation_context, self.voice_prepared_request)
+        # Use the pre-warmed LLM request for instant startup - returns async generator
+        live_events = self.voice_agent._llm_flow.run_live(invocation_context, self.voice_prepared_request)
+        return live_events
 
     async def start_text_conversation(self, memories=None):
         """Start text session for simple request/response processing"""
@@ -142,7 +141,7 @@ class AgentRunner:
         if self.voice_session is not None:
             return
             
-        # Initialize voice session
+        # Initialize voice session FIRST
         self.voice_session = await self.session_service.create_session(
             app_name=APP_NAME,
             user_id=self.client_id,
@@ -169,18 +168,24 @@ class AgentRunner:
         """Pre-connects to all MCP servers and prepares LLM request for instant live startup"""
         from google.adk.agents.invocation_context import InvocationContext
         
-        # Create a temporary invocation context for preprocessing
+        # Create a temporary invocation context that matches the live context structure
+        # Important: Use the actual live_request_queue to ensure compatibility
         temp_context = InvocationContext(
             artifact_service=self.artifact_service,
             session_service=self.session_service,
             invocation_id="temp_preprocessing",
             agent=self.voice_agent,
             session=self.voice_session,
+            live_request_queue=self.voice_live_request_queue,  # KEY FIX: Include live_request_queue
             run_config=self.runConfig,
         )
         
         # Pre-prepare the LLM request with all MCP connections established
-        self.voice_prepared_request = await self.voice_agent._llm_flow.prepare_for_live_connection(temp_context)
+        try:
+            self.voice_prepared_request = await self.voice_agent._llm_flow.prepare_for_live_connection(temp_context)
+        except Exception as e:
+            logger.error(f"MCP warm-up failed for client {self.client_id}: {e}")
+            raise
 
     async def _initialize_text(self, memories=None):
         """Initialize text agent and session"""
@@ -329,28 +334,32 @@ class AgentRunner:
         """
         Process voice ADK events using classify_event for all logic and send messages via callback
         """
-        async for event in live_events:
-            event_result = self.classify_event(event)
+        try:
+            async for event in live_events:
+                event_result = self.classify_event(event)
 
-            match event_result["type"]:
-                case "log_only":
-                    logger.info(f"[CLIENT:{self.client_id}][AGENT_EVENT] {event_result['log_message']}")
-                    continue
+                match event_result["type"]:
+                    case "log_only":
+                        logger.info(f"[CLIENT:{self.client_id}][AGENT_EVENT] {event_result['log_message']}")
+                        continue
 
-                case "audio":
-                    await message_sender(event_result["websocket_message"])
+                    case "audio":
+                        await message_sender(event_result["websocket_message"])
 
-                case "status":
-                    logger.info(f"[CLIENT:{self.client_id}][AGENT_EVENT] {event_result['log_message']}")
-                    await message_sender(event_result["websocket_message"])
+                    case "status":
+                        logger.info(f"[CLIENT:{self.client_id}][AGENT_EVENT] {event_result['log_message']}")
+                        await message_sender(event_result["websocket_message"])
 
-                case "close_connection":
-                    logger.info(f"[CLIENT:{self.client_id}][AGENT_EVENT] {event_result['log_message']}")
-                    await message_sender(event_result["websocket_message"])
-                    break
-                    
-                case _:
-                    continue
+                    case "close_connection":
+                        logger.info(f"[CLIENT:{self.client_id}][AGENT_EVENT] {event_result['log_message']}")
+                        await message_sender(event_result["websocket_message"])
+                        break
+                        
+                    case _:
+                        continue
+        except Exception as e:
+            logger.error(f"Error in process_voice_events for client {self.client_id}: {e}")
+            raise
 
     def classify_event(self, event) -> dict:
         """

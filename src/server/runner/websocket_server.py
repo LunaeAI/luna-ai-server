@@ -82,6 +82,7 @@ class WebSocketServer:
             logger.info(f"[WEBSOCKET] Pre-initialized voice agent for client {client_id} - ready for instant session start")
         except Exception as e:
             logger.error(f"[WEBSOCKET] Failed to pre-initialize agent for client {client_id}: {e}")
+            # Don't raise - let the voice session initialization handle it gracefully
     
     def _setup_routes(self):
         """Set up WebSocket routes"""
@@ -291,11 +292,6 @@ class WebSocketServer:
 
     async def _handle_voice_session_start(self, client_id: str, websocket: WebSocket, message: dict):
         """Start voice session with live streaming for a specific client"""
-        if self.client_voice_sessions.get(client_id, False):
-            logger.error(f"[WEBSOCKET] Voice session already active for client {client_id}")
-            await websocket.send_text(json.dumps({"error": "Voice session already active"}))
-            return
-            
         try:
             initial_message = message.get("initial_message")
             memories = message.get("memories", [])
@@ -308,6 +304,11 @@ class WebSocketServer:
             logger.info(f"[WEBSOCKET] Voice session starting for client {client_id} with {len(memories)} memories")
             
             agent_runner = self.client_runners[client_id]
+            
+            # Ensure agent is pre-initialized before starting session
+            if not hasattr(agent_runner, 'voice_prepared_request') or agent_runner.voice_prepared_request is None:
+                await self._pre_initialize_agent(client_id)
+            
             live_events, live_request_queue = await agent_runner.start_voice_conversation(initial_message, memories=memories)
             self.client_voice_sessions[client_id] = True
             

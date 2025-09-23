@@ -944,7 +944,7 @@ wheels = [
 
 [[package]]
 name = "google-cloud-spanner"
-version = "3.57.0"
+version = "3.58.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -955,9 +955,9 @@ dependencies = [
     { name = "protobuf" },
     { name = "sqlparse" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5e/e8/e008f9ffa2dcf596718d2533d96924735110378853c55f730d2527a19e04/google_cloud_spanner-3.57.0.tar.gz", hash = "sha256:73f52f58617449fcff7073274a7f7a798f4f7b2788eda26de3b7f98ad857ab99", size = 701574, upload-time = "2025-08-14T15:24:59.18Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/e2/5a6f8377c685d40d50701ffca3bc18d45565fb62c31941879f8efd7cdfad/google_cloud_spanner-3.58.0.tar.gz", hash = "sha256:00d9a809155d9a92e891a0a2b2568b920016652549864024da30940ac780cc2c", size = 702779, upload-time = "2025-09-22T05:36:25.917Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/9f/66fe9118bc0e593b65ade612775e397f596b0bcd75daa3ea63dbe1020f95/google_cloud_spanner-3.57.0-py3-none-any.whl", hash = "sha256:5b10b40bc646091f1b4cbb2e7e2e82ec66bcce52c7105f86b65070d34d6df86f", size = 501380, upload-time = "2025-08-14T15:24:57.683Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/86/49d9667324b9258e2bc0708dea2223256b6133954e71669086a953fb4210/google_cloud_spanner-3.58.0-py3-none-any.whl", hash = "sha256:db1c632ac5d0a1188cfe45b31db416120d3e0b07e885d0443a398c99e9fec542", size = 501919, upload-time = "2025-09-22T05:36:24.399Z" },
 ]
 
 [[package]]
@@ -1788,7 +1788,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "1.108.1"
+version = "1.108.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1800,9 +1800,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/7a/3f2fbdf82a22d48405c1872f7c3176a705eee80ff2d2715d29472089171f/openai-1.108.1.tar.gz", hash = "sha256:6648468c1aec4eacfa554001e933a9fa075f57bacfc27588c2e34456cee9fef9", size = 563735, upload-time = "2025-09-19T16:52:20.399Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/ff/1dc7bec988cfbab80c2b0ee61d5178915117a4f02f68777d528219e84866/openai-1.108.2.tar.gz", hash = "sha256:e6ce793e0ef8a52d343850a5411edbd5b21214f64a8d29cdca0fcb929e8e3155", size = 563898, upload-time = "2025-09-22T23:47:38.985Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/38/87/6ad18ce0e7b910e3706480451df48ff9e0af3b55e5db565adafd68a0706a/openai-1.108.1-py3-none-any.whl", hash = "sha256:952fc027e300b2ac23be92b064eac136a2bc58274cec16f5d2906c361340d59b", size = 948394, upload-time = "2025-09-19T16:52:18.369Z" },
+    { url = "https://files.pythonhosted.org/packages/13/2d/1cb19289feef689206cd8995d7be6b5d76b7e8d64fd51438acecc11ee395/openai-1.108.2-py3-none-any.whl", hash = "sha256:4c7caa23845a49aebd8f65e01b35739b5b2df5e621d4666cbe55f0973fae81b7", size = 948390, upload-time = "2025-09-22T23:47:36.644Z" },
 ]
 
 [[package]]
@@ -1992,7 +1992,7 @@ wheels = [
 
 [[package]]
 name = "posthog"
-version = "6.7.5"
+version = "6.7.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -2002,9 +2002,9 @@ dependencies = [
     { name = "six" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/f3/d9055bcd190980730bdc600318b34290e85fcb0afb1e31f83cdc33f92615/posthog-6.7.5.tar.gz", hash = "sha256:f4f32b4a4b0df531ae8f80f255a33a49e8880c8c1b62712e6b640535e33a905f", size = 118558, upload-time = "2025-09-16T12:40:34.431Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/ce/11d6fa30ab517018796e1d675498992da585479e7079770ec8fa99a61561/posthog-6.7.6.tar.gz", hash = "sha256:ee5c5ad04b857d96d9b7a4f715e23916a2f206bfcf25e5a9d328a3d27664b0d3", size = 119129, upload-time = "2025-09-22T18:11:12.365Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/b4/b40f8467252b4ff481e54a9767b211b4ff83114e6d0b6f481852d0ef3e46/posthog-6.7.5-py3-none-any.whl", hash = "sha256:95b00f915365939e63fa183635bad1caaf89cf4a24b63c8bb6983f2a22a56cb3", size = 136766, upload-time = "2025-09-16T12:40:32.741Z" },
+    { url = "https://files.pythonhosted.org/packages/de/84/586422d8861b5391c8414360b10f603c0b7859bb09ad688e64430ed0df7b/posthog-6.7.6-py3-none-any.whl", hash = "sha256:b09a7e65a042ec416c28874b397d3accae412a80a8b0ef3fa686fbffc99e4d4b", size = 137348, upload-time = "2025-09-22T18:11:10.807Z" },
 ]
 
 [[package]]
