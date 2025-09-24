@@ -120,7 +120,6 @@ class AgentRunner:
             run_config=self.runConfig,
         )
         
-        # Use the pre-warmed LLM request for instant startup - returns async generator
         live_events = self.voice_agent._llm_flow.run_live(invocation_context, self.voice_prepared_request)
         return live_events
 
@@ -161,7 +160,7 @@ class AgentRunner:
         
         self.voice_live_request_queue = LiveRequestQueue()
         
-        # Pre-warm MCP connections for instant live startup
+        # # Pre-warm MCP connections for instant live startup
         await self._warm_up_mcp_connections()
 
     async def _warm_up_mcp_connections(self):
@@ -180,7 +179,7 @@ class AgentRunner:
             run_config=self.runConfig,
         )
         
-        # Pre-prepare the LLM request with all MCP connections established
+        # # Pre-prepare the LLM request with all MCP connections established
         try:
             self.voice_prepared_request = await self.voice_agent._llm_flow.prepare_for_live_connection(temp_context)
         except Exception as e:

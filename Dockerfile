@@ -1,5 +1,5 @@
-# Use Python 3.12 slim image
-FROM python:3.12-slim
+# Use Python 3.11 slim image
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
@@ -17,14 +17,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt pyproject.toml uv.lock ./
+# Copy pyproject.toml for dependency management
+COPY pyproject.toml ./
 
 # Install uv for faster dependency resolution
 RUN pip install uv
 
-# Install Python dependencies using uv sync
-RUN uv sync --frozen --no-dev
+# Install Python dependencies using uv from pyproject.toml
+RUN uv pip install --system -e .
 
 # Copy source code
 COPY . .

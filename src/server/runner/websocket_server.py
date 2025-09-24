@@ -7,6 +7,8 @@ import base64
 import logging
 import os
 import uuid
+import wave
+import datetime
 from typing import Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Query
 import uvicorn
@@ -15,19 +17,12 @@ import httpx
 from google.genai.types import Blob
 from ..util.websocket_communication import set_websocket_connection, remove_websocket_connection, handle_websocket_response, get_mcp_queue
 from .agent_runner import AgentRunner
+from ..core.wake_word_detector import WakeWordDetector, WakeWordEvent, WakeWordStatus
 from ...auth import get_user_from_token
 from ...database import get_database_session, AgentUserContext
 from ...database.models import User
 
 logger = logging.getLogger(__name__)
-
-_mcp_port_mapping = os.environ.get('MCP_PORTS', '{}')
-
-def get_mcp_port_mapping():
-    """Get the MCP port mapping that was loaded from environment variable"""
-    global _mcp_port_mapping
-    return json.loads(_mcp_port_mapping)
-
 class WebSocketServer:
     """Handles multi-client WebSocket connections and message routing for dual voice/text sessions"""
     
@@ -44,10 +39,14 @@ class WebSocketServer:
         self.client_text_sessions: Dict[str, bool] = {}
         self.client_voice_tasks: Dict[str, asyncio.Task] = {}
         
-        # Log MCP port mapping when server is created
-        mcp_ports = get_mcp_port_mapping()
-        logger.info(f"[WEBSOCKET] MCP PORTS: {mcp_ports}")
-        
+        # Per-client wake word detection
+        self.client_wake_word_detectors: Dict[str, WakeWordDetector] = {}
+        self.client_wake_word_tasks: Dict[str, asyncio.Task] = {}
+
+        # Per-client audio recording for debugging
+        self.client_audio_buffers: Dict[str, list[bytes]] = {}
+        self.client_recording_start_time: Dict[str, datetime.datetime] = {}
+
         # Setup routes directly in constructor
         self._setup_routes()
     
@@ -66,11 +65,23 @@ class WebSocketServer:
         self.client_voice_sessions[client_id] = False
         self.client_text_sessions[client_id] = False
         
+        # Initialize audio recording for debugging
+        self.client_audio_buffers[client_id] = []
+        self.client_recording_start_time[client_id] = datetime.datetime.now()
+        
+        # Initialize wake word detector for this client
+        self.client_wake_word_detectors[client_id] = WakeWordDetector(client_id)
+        
         # Provide websocket reference to util.py tools
         set_websocket_connection(client_id, websocket)
         
         # Pre-initialize voice agent and warm up MCP connections immediately
         asyncio.create_task(self._pre_initialize_agent(client_id))
+        
+        # Start wake word detection for this client
+        asyncio.create_task(self._start_wake_word_detection(client_id))
+        
+        logger.info(f"Client {client_id} registered with user context: {user_context}")
         
         logger.info(f"Client {client_id} registered with user context: {user_context}")
 
@@ -78,8 +89,15 @@ class WebSocketServer:
         """Pre-initialize agent and warm up MCP connections for instant session starts"""
         try:
             agent_runner = self.client_runners[client_id]
+            websocket = self.client_websockets[client_id]
+
             await agent_runner._initialize_voice()  # This includes MCP warming
             logger.info(f"[WEBSOCKET] Pre-initialized voice agent for client {client_id} - ready for instant session start")
+
+            
+            await websocket.send_text(json.dumps({
+                "type": "initialized",
+            }))
         except Exception as e:
             logger.error(f"[WEBSOCKET] Failed to pre-initialize agent for client {client_id}: {e}")
             # Don't raise - let the voice session initialization handle it gracefully
@@ -124,7 +142,6 @@ class WebSocketServer:
             try:
                 logger.info(f"[WEBSOCKET] Client {client_id} ready, waiting for session initialization...")
                 
-                # Handle multiple session types in a loop
                 while True:
                     try:
                         message_json = await websocket.receive_text()
@@ -142,12 +159,15 @@ class WebSocketServer:
                             await self._handle_voice_session_stop(client_id)
                         elif message_type == "stop_text_session":
                             await self._handle_text_session_stop(client_id)
-                        elif message_type in ["voice_content", "text_content", "audio", "video"]:
+                        elif message_type in ["voice_content", "text_content", "video"]:
                             await self._route_session_message(client_id, message)
                         elif message_type.endswith("_response"):
                             handle_websocket_response(client_id, message)
-                        else:
-                            await self._route_session_message(client_id, message)
+                        elif message_type == "audio":
+                            if self.client_voice_sessions.get(client_id, False):
+                                await self._route_session_message(client_id, message)
+                            else:
+                                await self._route_wake_word_audio(client_id, message)
                             
                     except WebSocketDisconnect:
                         logger.info(f"[WEBSOCKET] Client {client_id} disconnected")
@@ -188,6 +208,7 @@ class WebSocketServer:
                 "active_clients": len(self.client_websockets),
                 "active_voice_sessions": sum(self.client_voice_sessions.values()),
                 "active_text_sessions": sum(self.client_text_sessions.values()),
+                "active_wake_word_detectors": len(self.client_wake_word_detectors),
             }
 
         @self.app.get("/weather")
@@ -304,10 +325,6 @@ class WebSocketServer:
             logger.info(f"[WEBSOCKET] Voice session starting for client {client_id} with {len(memories)} memories")
             
             agent_runner = self.client_runners[client_id]
-            
-            # Ensure agent is pre-initialized before starting session
-            if not hasattr(agent_runner, 'voice_prepared_request') or agent_runner.voice_prepared_request is None:
-                await self._pre_initialize_agent(client_id)
             
             live_events, live_request_queue = await agent_runner.start_voice_conversation(initial_message, memories=memories)
             self.client_voice_sessions[client_id] = True
@@ -484,45 +501,92 @@ class WebSocketServer:
         except Exception as e:
             logger.error(f"[WEBSOCKET] Error stopping text session for client {client_id}: {e}")
 
+    async def _route_wake_word_audio(self, client_id: str, message: dict):
+        """Route audio data to wake word detection for a specific client"""
+        # Extract audio data and forward to wake word detector
+        await self._handle_voice_session_start(client_id, self.client_websockets[client_id], {"initial_message": None, "memories": []})
+
+        return
+    
+        try:
+            data = message.get("data", "")
+            if data:
+                audio_bytes = base64.b64decode(data)
+                
+                # Capture audio for debugging
+                if client_id in self.client_audio_buffers:
+                    self.client_audio_buffers[client_id].append(audio_bytes)
+                
+                detector = self.client_wake_word_detectors.get(client_id)
+                if detector:
+                    detector.add_audio_chunk(audio_bytes)
+        except Exception as e:
+            logger.error(f"[WEBSOCKET] Error routing audio to wake word detector for client {client_id}: {e}")
+
+    async def _start_wake_word_detection(self, client_id: str):
+        """Start wake word detection task for a specific client"""
+        try:
+            detector = self.client_wake_word_detectors[client_id]
+            websocket = self.client_websockets[client_id]
+            
+            async def wake_word_event_handler():
+                try:
+                    async for event in detector.start():
+                        if isinstance(event, WakeWordEvent) and event.detected:
+                            logger.info(f"[WEBSOCKET] Wake word detected for client {client_id}: {event.wake_word} (confidence: {event.confidence:.3f})")
+                            
+                            # Automatically start voice session (client will know from voice_session_started event)
+                            await self._handle_voice_session_start(client_id, websocket, {"initial_message": None, "memories": []})
+                        
+                        elif isinstance(event, WakeWordStatus):
+                            # Log periodic status updates (optional, can be removed if too verbose)
+                            max_score = max(event.scores.values()) if event.scores else 0.0
+                            if max_score > 0.1:  # Only log if there's some audio activity
+                                logger.debug(f"[WEBSOCKET] Wake word scores for client {client_id}: {event.scores}")
+                        
+                except Exception as e:
+                    logger.error(f"[WEBSOCKET] Error in wake word detection for client {client_id}: {e}")
+            
+            # Start the wake word detection task
+            wake_word_task = asyncio.create_task(wake_word_event_handler())
+            self.client_wake_word_tasks[client_id] = wake_word_task
+            
+            logger.info(f"[WEBSOCKET] Wake word detection started for client {client_id}")
+            
+        except Exception as e:
+            logger.error(f"[WEBSOCKET] Failed to start wake word detection for client {client_id}: {e}")
+
     async def _route_session_message(self, client_id: str, message: dict):
         """Route messages to appropriate active session for a specific client"""
-        message_type = message.get("type", "")
         
-        # Route voice-related messages
-        if message_type in ["voice_content", "audio", "video"]:
-            if not self.client_voice_sessions.get(client_id, False):
-                return
-                
-            agent_runner = self.client_runners[client_id]
-            if not hasattr(agent_runner, 'voice_live_request_queue') or not agent_runner.voice_live_request_queue:
-                return
-                
-            mime_type = message.get("mime_type", "")
-            data = message.get("data", "")
+        agent_runner = self.client_runners[client_id]
             
-            if message_type == "voice_content":
-                content = message.get("content", "")
-                logger.info(f"[WEBSOCKET] Sending voice content for client {client_id}: {content[:50]}...")
-                await agent_runner.send_voice_content(content)
-                
-            elif (message_type == "audio" and mime_type == "audio/pcm") or \
-                 (message_type == "video" and mime_type == "image/jpeg"):
-                decoded_data = base64.b64decode(data)
-                agent_runner.voice_live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
+        mime_type = message.get("mime_type", "")
+        data = message.get("data", "")
+
+        decoded_data = base64.b64decode(data)
         
-        # Route text-related messages 
-        elif message_type == "text_content":
-            # Text content is handled via start_text_session, not ongoing messaging
-            logger.error(f"[WEBSOCKET] Unexpected text_content message for client {client_id} - use start_text_session instead")
+        # Capture audio for debugging if this is audio data
+        if message.get("type") == "audio" and client_id in self.client_audio_buffers:
+            self.client_audio_buffers[client_id].append(decoded_data)
+        
+        agent_runner.voice_live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
+
 
     async def _cleanup_client(self, client_id: str):
         """Clean up all sessions for a specific client"""
         try:
+            # Save recorded audio to WAV file for debugging
+            await self._save_audio_recording(client_id)
+            
             # Stop voice session
             await self._handle_voice_session_stop(client_id)
             
             # Stop text session
             await self._handle_text_session_stop(client_id)
+            
+            # Stop wake word detection
+            await self._stop_wake_word_detection(client_id)
             
             # Remove client references
             if client_id in self.client_websockets:
@@ -535,6 +599,12 @@ class WebSocketServer:
                 del self.client_voice_sessions[client_id]
             if client_id in self.client_text_sessions:
                 del self.client_text_sessions[client_id]
+            if client_id in self.client_wake_word_detectors:
+                del self.client_wake_word_detectors[client_id]
+            if client_id in self.client_audio_buffers:
+                del self.client_audio_buffers[client_id]
+            if client_id in self.client_recording_start_time:
+                del self.client_recording_start_time[client_id]
             
             # Remove from websocket communication util
             remove_websocket_connection(client_id)
@@ -544,8 +614,53 @@ class WebSocketServer:
         except Exception as e:
             logger.error(f"[WEBSOCKET] Error during cleanup for client {client_id}: {e}")
 
+    async def _save_audio_recording(self, client_id: str):
+        """Save recorded audio to WAV file for debugging purposes"""
+        try:
+            if client_id not in self.client_audio_buffers or not self.client_audio_buffers[client_id]:
+                logger.debug(f"[WEBSOCKET] No audio recorded for client {client_id}, skipping WAV file creation")
+                return
+            
+            # Get recorded audio chunks and timestamps
+            audio_chunks = self.client_audio_buffers[client_id]
+            start_time = self.client_recording_start_time.get(client_id, datetime.datetime.now())
+            
+            # Create filename with timestamp
+            timestamp_str = start_time.strftime("%Y%m%d_%H%M%S")
+            filename = f"audio_debug_client_{client_id[:8]}_{timestamp_str}.wav"
+            
+            # Concatenate all audio chunks
+            audio_data = b''.join(audio_chunks)
+            
+            if not audio_data:
+                logger.debug(f"[WEBSOCKET] Empty audio data for client {client_id}, skipping WAV file creation")
+                return
+            
+            # Audio format assumptions based on Luna AI specs:
+            # 24kHz sample rate, 16-bit PCM, mono (from copilot instructions)
+            sample_rate = 24000
+            channels = 1
+            sample_width = 2  # 16-bit = 2 bytes per sample
+            
+            # Write WAV file
+            with wave.open(filename, 'wb') as wav_file:
+                wav_file.setnchannels(channels)
+                wav_file.setsampwidth(sample_width)
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(audio_data)
+            
+            audio_duration = len(audio_data) / (sample_rate * channels * sample_width)
+            logger.info(f"[WEBSOCKET] Saved {audio_duration:.1f}s of audio for client {client_id} to {filename}")
+            
+        except Exception as e:
+            logger.error(f"[WEBSOCKET] Error saving audio recording for client {client_id}: {e}")
+
     async def start_server(self, host: str = "0.0.0.0", port: int = None):
         """Start the FastAPI server with deployment-ready defaults"""
+        import openwakeword
+
+        openwakeword.utils.download_models()
+
         if port is None:
             port = int(os.environ.get("PORT"))
             
