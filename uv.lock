@@ -753,8 +753,8 @@ wheels = [
 
 [[package]]
 name = "google-adk"
-version = "1.14.1"
-source = { registry = "https://pypi.org/simple" }
+version = "1.13.0"
+source = { git = "https://github.com/enxilium/adk-python.git?rev=luna-ai-patches#57c0b13c50e1771a5e39d40b60a99d82a678f3db" }
 dependencies = [
     { name = "absolufy-imports" },
     { name = "anyio" },
@@ -788,10 +788,6 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchdog" },
     { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/35/fe/0efba60d22bfcd7ab18f48d23771f0701664fd93be247eddc42592b9b68f/google_adk-1.14.1.tar.gz", hash = "sha256:06caab4599286123eceb9348e4accb6c3c1476b8d9b2b13f078a975c8ace966f", size = 1681879, upload-time = "2025-09-15T00:06:48.823Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/74/0b68fab470f13e80fd135bcf890c13bb1154804c1eaaff60dd1f5995027c/google_adk-1.14.1-py3-none-any.whl", hash = "sha256:acb31ed41d3b05b0d3a65cce76f6ef1289385f49a72164a07dae56190b648d50", size = 1922802, upload-time = "2025-09-15T00:06:47.011Z" },
 ]
 
 [[package]]
@@ -1651,7 +1647,7 @@ requires-dist = [
     { name = "browser-use", specifier = ">=0.7.1" },
     { name = "colorama", specifier = ">=0.4.6" },
     { name = "fastapi", specifier = ">=0.116.1" },
-    { name = "google-adk" },
+    { name = "google-adk", git = "https://github.com/enxilium/adk-python.git?rev=luna-ai-patches" },
     { name = "google-api-python-client", specifier = ">=2.181.0" },
     { name = "google-auth-oauthlib", specifier = ">=1.2.2" },
     { name = "httpx", specifier = ">=0.28.1" },

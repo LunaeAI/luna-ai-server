@@ -504,10 +504,6 @@ class WebSocketServer:
     async def _route_wake_word_audio(self, client_id: str, message: dict):
         """Route audio data to wake word detection for a specific client"""
         # Extract audio data and forward to wake word detector
-        await self._handle_voice_session_start(client_id, self.client_websockets[client_id], {"initial_message": None, "memories": []})
-
-        return
-    
         try:
             data = message.get("data", "")
             if data:
