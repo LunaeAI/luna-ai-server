@@ -2,12 +2,17 @@
 After-tool callback for logging tool executions via WebSocket
 Uses ADK's ToolContext for client isolation
 """
+import json
+import logging
 from google.adk.tools import ToolContext
 from google.adk.tools.base_tool import BaseTool
 from typing import Dict, Any, Optional, Set
 import asyncio
 
+logger = logging.getLogger(__name__)
+
 from ....util.websocket_communication import send_websocket_command
+from ....util.memory_analysis import analyze_behavior
 
 # Skip memory-related tools as they don't provide user behavioral insights
 _SKIP_TOOLS = {
@@ -15,6 +20,9 @@ _SKIP_TOOLS = {
     "delete_memory", "reinforce_memory", "weaken_memory", "clear_all_memories",
     "end_conversation_session", "get_memory_stats", "get_memory_by_id"
 }
+
+# Counter to track tool executions per client (only trigger analysis every 10 calls)
+_client_tool_counters: Dict[str, int] = {}
 
 
 def after_tool_callback(
@@ -51,6 +59,26 @@ async def _log_tool_execution_async(
     }
 
     try:
-        await send_websocket_command("memory_request", "log_tool_execution", execution_data, client_id)
+        result = await send_websocket_command("memory_request", "log_tool_execution", execution_data, client_id)
+
+        if result.get("status") != "success":
+            logger.warning(f"Failed to log tool execution for tool {tool.name} and client {client_id}")
+            return
+
+        if client_id not in _client_tool_counters:
+            _client_tool_counters[client_id] = 0
+
+        _client_tool_counters[client_id] += 1
+        
+        if _client_tool_counters[client_id] >= 1: # TODO: Change this back to 10 for production.
+            past_memories = await send_websocket_command("memory_request", "list", {"minConfidence": 0.1}, client_id)
+            past_tools = await send_websocket_command("memory_request", "list_tool_logs", {}, client_id)
+
+            logger.info(f"Triggering behavior analysis for client {client_id} with {json.dumps(past_memories)} and {json.dumps(past_tools)}")
+
+            asyncio.create_task(analyze_behavior(past_memories, past_tools, client_id))
+            
+            _client_tool_counters[client_id] = 0
+
     except Exception:
         pass

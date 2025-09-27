@@ -1,6 +1,7 @@
 """
 AgentRunner - Handles all agent-related operations and ADK session management
 """
+import base64
 import logging
 from typing import Tuple, Callable, Optional
 
@@ -9,7 +10,7 @@ from google.adk.agents import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.sessions import InMemorySessionService
 from google.adk.artifacts import InMemoryArtifactService
-from google.genai.types import Content, Modality, SpeechConfig, VoiceConfig, PrebuiltVoiceConfig, Part
+from google.genai.types import Content, Modality, SpeechConfig, VoiceConfig, PrebuiltVoiceConfig, Part, Blob
 from ..core.agent import get_agent_async, get_text_agent_async
 from ..core.tools.browser_tools import cleanup_all_browser_sessions
 from ...database.models import AgentUserContext
@@ -43,6 +44,7 @@ class AgentRunner:
         self.text_session = None
         self.text_agent = None
         self.text_runner = None
+        self.text_session_type = None  # Track active session type: 'explain', 'rewrite', 'chat'
         
         # Set response modality (AUDIO for Luna) - matching old commit pattern
         modality = [Modality.AUDIO]
@@ -109,7 +111,6 @@ class AgentRunner:
         """Run live conversation with pre-warmed MCP connections for instant startup"""
         from google.adk.agents.invocation_context import InvocationContext
         
-        # Create live invocation context
         invocation_context = InvocationContext(
             artifact_service=self.artifact_service,
             session_service=self.session_service,
@@ -123,16 +124,7 @@ class AgentRunner:
         live_events = self.voice_agent._llm_flow.run_live(invocation_context, self.voice_prepared_request)
         return live_events
 
-    async def start_text_conversation(self, memories=None):
-        """Start text session for simple request/response processing"""
-        if self.text_session is not None:
-            raise RuntimeError("Text session already active")
-            
-        logger.info(f"[CLIENT:{self.client_id}] Starting text conversation session")
 
-        await self._initialize_text(memories=memories)
-
-        logger.info(f"[CLIENT:{self.client_id}] Created text session {self.text_session.id} for user {self.client_id}")
 
     async def _initialize_voice(self, memories=None):
         """Initialize voice agent and session"""
@@ -209,67 +201,56 @@ class AgentRunner:
             artifact_service=self.artifact_service
         )
 
-    async def process_text_action(self, action: str, selected_text: str, additional_prompt: Optional[str] = None) -> str:
-        """Process single text action and return result"""
-        if not self.text_session:
-            raise RuntimeError("No active text session")
+    async def start_text_session_with_type(self, session_type: str, selected_text: str, user_query: str, memories=None):
+        """Start a new text session with specified type, selected text, and user query"""
+        if session_type not in ["explain", "rewrite", "chat"]:
+            raise ValueError(f"Unsupported session type: {session_type}")
             
-        # Build prompt based on action
-        prompts = {
-            "explain": f"Please explain this text clearly and concisely:\n\n{selected_text}",
-            "rewrite": f"Rewrite this text to be clearer and more polished:\n\n{selected_text}",
-            "chat": f"{additional_prompt or 'What can you tell me about this?'}\n\nContext (highlighted text):\n{selected_text}"
-        }
+        if self.text_session is not None:
+            raise RuntimeError(f"Text session already active with type '{self.text_session_type}'. End current session first.")
         
-        if action not in prompts:
-            raise ValueError(f"Unsupported action: {action}")
+        # Initialize text session
+        await self._initialize_text(memories=memories)
+        self.text_session_type = session_type
         
-        logger.info(f"[CLIENT:{self.client_id}] Processing text action '{action}' for text: {selected_text[:50]}...")
+        # Build initial system prompt and user message based on session type
+        if session_type == "explain":
+            system_prompt = "You are an AI assistant specialized in explaining concepts, texts, and ideas clearly and concisely. Your role is to break down complex information into understandable explanations. Continue the conversation naturally based on follow-up questions or requests for clarification."
+            user_message = f"Please explain the following text:\n\n{selected_text}"
+        elif session_type == "rewrite":
+            system_prompt = "You are an AI assistant specialized in rewriting and improving text based on user specifications. Focus on rewriting the provided text according to the user's instructions while maintaining clarity and coherence."
+            user_message = f"Please rewrite the following text according to these instructions: {user_query}\n\nOriginal text:\n{selected_text}"
+        elif session_type == "chat":
+            system_prompt = "You are a helpful AI assistant having a natural conversation. Use the provided selected text as context for the conversation. Provide thoughtful, engaging responses and maintain context throughout our conversation."
+            user_message = f"Context: {selected_text}\n\nUser: {user_query}"
         
-        # run_async returns an async generator, we need to iterate through it
-        async_gen = self.text_runner.run_async(
-            user_id=self.client_id,
-            session_id=self.text_session.id,
-            new_message=Content(
-                role="user",
-                parts=[Part.from_text(text=prompts[action])]
-            )
-        )
+        logger.info(f"[CLIENT:{self.client_id}] Starting {session_type} text session with selected_text: {selected_text[:50]}... and user_query: {user_query[:50]}...")
         
-        # Collect all text parts from the async generator
-        result_text = ""
-        async for event in async_gen:
-            if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
-                for part in event.content.parts:
-                    if hasattr(part, 'text') and part.text:
-                        result_text += part.text
+        # Send initial message to start the conversation
+        initial_message = f"{system_prompt}\n\n{user_message}"
         
-        return result_text
-
-    async def stream_text_action(self, action: str, selected_text: str, additional_prompt: Optional[str] = None):
-        """Stream text action results for real-time UI updates"""
-        if not self.text_session:
-            raise RuntimeError("No active text session")
-            
-        # Build prompt based on action
-        prompts = {
-            "explain": f"Please explain this text clearly and concisely:\n\n{selected_text}",
-            "rewrite": f"Rewrite this text to be clearer and more polished:\n\n{selected_text}",
-            "chat": f"{additional_prompt or 'What can you tell me about this?'}\n\nContext (highlighted text):\n{selected_text}"
-        }
-        
-        if action not in prompts:
-            raise ValueError(f"Unsupported action: {action}")
-        
-        logger.info(f"[CLIENT:{self.client_id}] Streaming text action '{action}' for text: {selected_text[:50]}...")
-        
-        # Return the async generator directly for streaming
         return self.text_runner.run_async(
             user_id=self.client_id,
             session_id=self.text_session.id,
             new_message=Content(
                 role="user",
-                parts=[Part.from_text(text=prompts[action])]
+                parts=[Part.from_text(text=initial_message)]
+            )
+        )
+
+    async def continue_text_conversation(self, message: str):
+        """Continue the active text conversation with a new message"""
+        if not self.text_session or not self.text_session_type:
+            raise RuntimeError("No active text session")
+            
+        logger.info(f"[CLIENT:{self.client_id}] Continuing {self.text_session_type} conversation with: {message[:50]}...")
+        
+        return self.text_runner.run_async(
+            user_id=self.client_id,
+            session_id=self.text_session.id,
+            new_message=Content(
+                role="user",
+                parts=[Part.from_text(text=message)]
             )
         )
 
@@ -315,19 +296,23 @@ class AgentRunner:
             self.text_session = None
             self.text_agent = None
             self.text_runner = None
+            self.text_session_type = None
             logger.info(f"[CLIENT:{self.client_id}] Text session ended")
 
-    async def send_voice_content(self, message: str):
+    async def send_voice_content(self, message):
         """Send content to voice agent using existing session and live_request_queue"""
         if not self.voice_session or not self.voice_live_request_queue:
             raise RuntimeError("No active voice conversation session.")
+        
+        mime_type = message.get("mime_type", "")
+        data = message.get("data", "")
+        decoded_data = base64.b64decode(data)
             
-        self.voice_live_request_queue.send_content(
-            Content(
-                role="user",
-                parts=[Part.from_text(text=message)]
-            )
-        )
+        self.voice_live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
+
+    def get_text_session_type(self) -> Optional[str]:
+        """Get the current active text session type"""
+        return self.text_session_type
 
     async def process_voice_events(self, live_events, message_sender: Callable) -> None:
         """
@@ -370,7 +355,7 @@ class AgentRunner:
                     "type": "close_connection",
                     "log_message": "TURN_COMPLETE - CLOSING_CONNECTION",
                     "websocket_message": {
-                        "status": "close_connection",
+                        "type": "voice_session_ended",
                     }
                 }
             else:
@@ -378,7 +363,7 @@ class AgentRunner:
                     "type": "status",
                     "log_message": "TURN_COMPLETE",
                     "websocket_message": {
-                        "status": "turn_complete"
+                        "type": "turn_complete"
                     }
                 }
         
@@ -390,7 +375,7 @@ class AgentRunner:
                     "type": "status",
                     "log_message": "INTERRUPTED",
                     "websocket_message": {
-                        "status": "interrupted"
+                        "type": "interrupted"
                     }
                 }
         

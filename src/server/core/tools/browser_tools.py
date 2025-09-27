@@ -198,7 +198,7 @@ async def monitor_authentication_background(managed_session):
 
 async def start_browser_task(task: str, flash: bool, tool_context: ToolContext) -> AsyncGenerator[str, None]:
     """
-    Start a browser task with authentication support and keep browser alive.
+    Start a task to be executed in the browser. Should be called only when the user specifically requests for a task to be done that cannot be done with any of your other tools.
 
     Args:
         task: The task identifier for the browser automation.

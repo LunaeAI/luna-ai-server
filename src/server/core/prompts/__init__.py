@@ -60,13 +60,22 @@ def create_analysis_prompt(analysis_data: Dict[str, Any]) -> Tuple[str, Dict[str
     tool_data = ""
     if tool_executions:
         tool_data = "RECENT TOOL EXECUTIONS:\n"
-        for i, execution in enumerate(tool_executions[:20], 1):  # Limit to most recent 20
+        for i, execution in enumerate(tool_executions[-20:], 1):  # Limit to most recent 20
             tool_name = execution.get("tool", "unknown")
-            timestamp = execution.get("timestamp", "unknown")
+            # Handle both timestamp and created_at fields
+            timestamp = execution.get("timestamp") or execution.get("created_at", "unknown")
             arguments = execution.get("arguments", {})
-            context = execution.get("context", None)
-            context_str = f" | Context: {context}" if context else ""
-            tool_data += f"{i}. {tool_name} at {timestamp} with args: {arguments}{context_str}\n"
+            # Handle both context and result fields for additional context
+            context = execution.get("context")
+            result = execution.get("result", "")
+            
+            context_info = ""
+            if context:
+                context_info += f" | Context: {context}"
+            if result and len(str(result)) < 100:  # Only include short results
+                context_info += f" | Result: {str(result)[:100]}"
+                
+            tool_data += f"{i}. {tool_name} at {timestamp} with args: {arguments}{context_info}\n"
     else:
         tool_data = "No tool executions found.\n"
     
@@ -76,7 +85,8 @@ def create_analysis_prompt(analysis_data: Dict[str, Any]) -> Tuple[str, Dict[str
         memory_context = "\nCURRENTLY STORED MEMORIES:\n"
         for memory in stored_memories:
             memory_id = memory.get("id", "unknown")
-            memory_text = memory.get("memory", "")
+            # Handle both 'memory' and 'text' fields for memory content
+            memory_text = memory.get("memory") or memory.get("text", "")
             confidence = memory.get("confidence", 0.0)
             memory_context += f"ID {memory_id} (confidence: {confidence:.2f}): {memory_text}\n"
     else:

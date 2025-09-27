@@ -8,41 +8,6 @@ from typing import Dict, Any, Optional
 from google.adk.tools import ToolContext
 from ...util.websocket_communication import send_websocket_command
 
-async def search_memory(query: str, tool_context: ToolContext) -> Dict[str, Any]:
-    """
-    Search through past conversations and memories. You should use this to search for any information about the user that may be relevant to the current request, and should also be called if searching Google does not work.
-    If the user asks you if you remember certain information or facts, you MUST call this tool. Only say you don't remember something if this tool yields no results.
-    
-    Args:
-        query: What to search your memories for.
-        
-    Returns:
-        dict: {"status": "success|no_memories|error", "memories": formatted_memories, "message": Optional[error_message]}
-    """
-    search_data = {
-        "query": query,
-        "minConfidence": 0.3
-    }
-
-    client_id = tool_context.state.get("client_id")
-    
-    result = await send_websocket_command("memory_request", "search", search_data, client_id)
-    
-    if result.get("status") == "success":
-        memories = result.get("data", {}).get("memories", [])
-        
-        if memories:
-            # Format memories for display
-            memory_context = "\n".join([
-                f"- {memory['memory']} (confidence: {memory['confidence']:.2f})" 
-                for memory in memories
-            ])
-            return {"status": "success", "memories": memory_context}
-        else:
-            return {"status": "no_memories", "message": "No relevant memories found"}
-    else:
-        return {"status": "error", "message": result.get("message", "Failed to search memories")}
-
 async def save_memory(text: str, tool_context: ToolContext) -> Dict[str, Any]:
     """
     Save important information to memory. This can include any preferences the user mentions 
@@ -71,14 +36,14 @@ async def save_memory(text: str, tool_context: ToolContext) -> Dict[str, Any]:
 
 async def get_all_memories(tool_context: ToolContext) -> Dict[str, Any]:
     """
-    Get all memories from the database.
-        
+    Get all memories about the user from past conversations and memories. You should use this to search for any information about the user that may be relevant to the current request, and should also be called if searching Google does not work.
+    If the user asks you if you remember certain information or facts, you MUST call this tool. Only say you don't remember something if this tool yields no results.
+    
     Returns:
         dict: {"status": "success|error", "memories": List[Dict], "message": Optional[error_message]}
     """
     client_id = tool_context.state.get("client_id")
     
-    # Send command via WebSocket and wait for response
     result = await send_websocket_command("memory_request", "list", {"minConfidence": 0.1}, client_id)
     
     if result.get("status") == "success":
@@ -94,7 +59,7 @@ async def get_all_memories(tool_context: ToolContext) -> Dict[str, Any]:
 
 async def modify_memory(memory_id: str, new_text: Optional[str], new_confidence: Optional[float], tool_context: ToolContext) -> Dict[str, Any]:
     """
-    Modify an existing memory's content or confidence.
+    Modify an existing memory's content or confidence. You should run get_all_memories first to fetch the relevant memory's ID, unless you already know it.
     
     Args:
         memory_id: ID of the memory to modify
@@ -219,7 +184,6 @@ async def clear_all_memories(tool_context: ToolContext) -> Dict[str, Any]:
     return result
 
 memory_tools = [
-    search_memory,
     save_memory,
     get_all_memories,
     modify_memory,

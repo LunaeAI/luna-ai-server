@@ -7,7 +7,6 @@ import base64
 import logging
 import os
 import uuid
-import wave
 import datetime
 from typing import Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Query
@@ -38,14 +37,11 @@ class WebSocketServer:
         self.client_voice_sessions: Dict[str, bool] = {}
         self.client_text_sessions: Dict[str, bool] = {}
         self.client_voice_tasks: Dict[str, asyncio.Task] = {}
+        self.client_text_tasks: Dict[str, asyncio.Task] = {}
         
         # Per-client wake word detection
         self.client_wake_word_detectors: Dict[str, WakeWordDetector] = {}
         self.client_wake_word_tasks: Dict[str, asyncio.Task] = {}
-
-        # Per-client audio recording for debugging
-        self.client_audio_buffers: Dict[str, list[bytes]] = {}
-        self.client_recording_start_time: Dict[str, datetime.datetime] = {}
 
         # Setup routes directly in constructor
         self._setup_routes()
@@ -64,10 +60,6 @@ class WebSocketServer:
         self.client_user_contexts[client_id] = user_context
         self.client_voice_sessions[client_id] = False
         self.client_text_sessions[client_id] = False
-        
-        # Initialize audio recording for debugging
-        self.client_audio_buffers[client_id] = []
-        self.client_recording_start_time[client_id] = datetime.datetime.now()
         
         # Initialize wake word detector for this client
         self.client_wake_word_detectors[client_id] = WakeWordDetector(client_id)
@@ -145,29 +137,28 @@ class WebSocketServer:
                 while True:
                     try:
                         message_json = await websocket.receive_text()
-                        message = json.loads(message_json)
-                        message_type = message.get("type", "")
-                        
+                        msg = json.loads(message_json)
+                        message = msg.get("payload")
+                        message_type = msg.get("type", "")
                         # Route messages based on type
                         if message_type == "start_voice_session":
                             await self._handle_voice_session_start(client_id, websocket, message)
                         elif message_type == "start_text_session":
                             await self._handle_text_session_start(client_id, websocket, message)
-                        elif message_type == "text_action":
-                            await self._handle_text_action(client_id, websocket, message)
                         elif message_type == "stop_voice_session":
                             await self._handle_voice_session_stop(client_id)
                         elif message_type == "stop_text_session":
                             await self._handle_text_session_stop(client_id)
-                        elif message_type in ["voice_content", "text_content", "video"]:
-                            await self._route_session_message(client_id, message)
+                        elif message_type == "text":
+                                await self._route_text_session_message(client_id, message)
                         elif message_type.endswith("_response"):
-                            handle_websocket_response(client_id, message)
-                        elif message_type == "audio":
+                            handle_websocket_response(client_id, msg)
+                        elif message_type == "audio" or message_type == "video":
                             if self.client_voice_sessions.get(client_id, False):
-                                await self._route_session_message(client_id, message)
+                                await self._route_voice_session_message(client_id, message)
                             else:
-                                await self._route_wake_word_audio(client_id, message)
+                                if message_type == "audio":
+                                    await self._route_wake_word_audio(client_id, message)
                             
                     except WebSocketDisconnect:
                         logger.info(f"[WEBSOCKET] Client {client_id} disconnected")
@@ -289,20 +280,15 @@ class WebSocketServer:
             # Wait for response with timeout to prevent blocking
             try:
                 response_data = await asyncio.wait_for(get_mcp_queue(client_id).get(), timeout=30.0)
+
+                logger.info(f"[WEBSOCKET] Received MCP response: {response_data}")
                 
                 # Handle null or empty responses gracefully
                 if response_data is None:
                     logger.warning(f"[WEBSOCKET] Received null response for MCP request {request_id}")
                     return {"error": "No response received from client"}
                 
-                result = response_data.get("data")
-                
-                # Handle empty data in response
-                if result is None:
-                    logger.warning(f"[WEBSOCKET] Received empty data in MCP response for request {request_id}")
-                    return {"error": "Empty response data"}
-                
-                return result
+                return response_data
                 
             except asyncio.TimeoutError:
                 logger.error(f"[WEBSOCKET] Timeout waiting for MCP response for client {client_id}, request {request_id}")
@@ -354,89 +340,73 @@ class WebSocketServer:
                 "error": str(e)
             }))
 
-    async def _handle_text_session_start(self, client_id: str, websocket: WebSocket, message: dict):
-        """Start text session for single request/response for a specific client"""
-        try:
-            action = message.get("action")
-            selected_text = message.get("selected_text")
-            additional_prompt = message.get("additional_prompt")
-            memories = message.get("memories", [])
-            
-            if not action or not selected_text:
-                await websocket.send_text(json.dumps({
-                    "type": "text_session_error",
-                    "error": "Missing action or selected_text"
-                }))
-                return
-            
-            logger.info(f"[WEBSOCKET] Processing text action for client {client_id}: {action} for text: {selected_text[:50]}...")
-            
-            # Initialize text session if not already active
-            agent_runner = self.client_runners[client_id]
-            if not self.client_text_sessions.get(client_id, False):
-                await agent_runner.start_text_conversation(memories=memories)
-                self.client_text_sessions[client_id] = True
-                logger.info(f"[WEBSOCKET] Text session started for client {client_id} with {len(memories)} memories loaded")
-            
-            # Process the text action
-            result = await agent_runner.process_text_action(action, selected_text, additional_prompt)
-            
-            # Send result back
-            await websocket.send_text(json.dumps({
-                "type": "text_session_result",
-                "action": action,
-                "result": result,
-                "status": "success"
-            }))
-            
-        except Exception as e:
-            logger.error(f"[WEBSOCKET] Error processing text action for client {client_id}: {e}")
-            await websocket.send_text(json.dumps({
-                "type": "text_session_error",
-                "error": str(e)
-            }))
 
-    async def _handle_text_action(self, client_id: str, websocket: WebSocket, message: dict):
-        """Handle text overlay actions with different behaviors for a specific client"""
+
+    async def _handle_text_session_start(self, client_id: str, websocket: WebSocket, message: dict):
+        """Start a new text session with specified type (explain/rewrite/chat)"""
         try:
-            action = message.get("action")
-            text = message.get("text")
-            additional_prompt = message.get("additional_prompt")
-            memories = message.get("memories", [])
+            message = message.get("initial_message", message)  # Support both nested and flat structure
+            session_type = message.get("session_type")  # 'explain', 'rewrite', or 'chat'
+            content_obj = message.get("content")  # Now expects object with selected_text and user_query
             
-            if not action or not text:
+            # Handle nested memories structure
+            memories_obj = message.get("memories", {})
+            if isinstance(memories_obj, dict) and "memories" in memories_obj:
+                memories = memories_obj["memories"]
+            else:
+                memories = memories_obj if isinstance(memories_obj, list) else []
+            
+            agent_runner = self.client_runners[client_id]
+            
+            # Check if text session is already active
+            if self.client_text_sessions.get(client_id, False):
+                current_type = agent_runner.get_text_session_type()
                 await websocket.send_text(json.dumps({
                     "type": "error",
-                    "error": "Missing action or text"
+                    "error": f"Text session already active with type '{current_type}'. End current session first."
                 }))
                 return
             
-            logger.info(f"[WEBSOCKET] Processing text overlay action for client {client_id}: {action}")
+            # Validate content structure
+            if not isinstance(content_obj, dict) or "selected_text" not in content_obj or "user_query" not in content_obj:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "error": "Content must be an object with 'selected_text' and 'user_query' fields.  Received: " + str(json.dumps(content_obj))
+                }))
+                return
             
-            # Initialize text session if not already active (persistent for all actions)
-            agent_runner = self.client_runners[client_id]
-            if not self.client_text_sessions.get(client_id, False):
-                await agent_runner.start_text_conversation(memories=memories)
-                self.client_text_sessions[client_id] = True
-                logger.info(f"[WEBSOCKET] Text session started for overlay action for client {client_id} with {len(memories)} memories")
+            selected_text = content_obj.get("selected_text", "")
+            user_query = content_obj.get("user_query", "")
             
-            # All actions use streaming - the difference is how the frontend handles the response
-            await self._stream_text_response(client_id, websocket, action, text, additional_prompt)
+            logger.info(f"[WEBSOCKET] Starting {session_type} text session for client {client_id} with selected_text: {selected_text[:50]}... and user_query: {user_query[:50]}...")
+            
+            # Start new text session with specified type
+            async_gen = await agent_runner.start_text_session_with_type(session_type, selected_text, user_query, memories=memories)
+            self.client_text_sessions[client_id] = True
+            
+            # Send session started confirmation
+            await websocket.send_text(json.dumps({
+                "type": "text_session_started",
+                "session_type": session_type,
+                "memories_loaded": len(memories)
+            }))
+            
+            # Stream the initial response in background task
+            text_streaming_task = asyncio.create_task(
+                self._stream_text_response_from_generator(client_id, websocket, async_gen)
+            )
+            self.client_text_tasks[client_id] = text_streaming_task
                 
         except Exception as e:
-            logger.error(f"[WEBSOCKET] Error processing text action for client {client_id}: {e}")
+            logger.error(f"[WEBSOCKET] Error starting text session for client {client_id}: {e}")
             await websocket.send_text(json.dumps({
                 "type": "error",
                 "error": str(e)
             }))
 
-    async def _stream_text_response(self, client_id: str, websocket: WebSocket, action: str, text: str, additional_prompt: str = None):
-        """Stream text response for chat/explain actions for a specific client"""
+    async def _stream_text_response_from_generator(self, client_id: str, websocket: WebSocket, async_gen):
+        """Stream text response from an async generator for a specific client"""
         try:
-            # Use the agent runner to get a streaming async generator
-            agent_runner = self.client_runners[client_id]
-            async_gen = await agent_runner.stream_text_action(action, text, additional_prompt)
-            
             # Stream the response in real-time
             async for event in async_gen:
                 if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
@@ -444,18 +414,22 @@ class WebSocketServer:
                         if hasattr(part, 'text') and part.text:
                             # Send each text chunk as it arrives
                             await websocket.send_text(json.dumps({
-                                "type": "chunk",
+                                "session": "text",
+                                "type": "text_content",
                                 "data": part.text
                             }))
             
             # Send completion signal
             await websocket.send_text(json.dumps({
+                "session": "text",
                 "type": "complete",
                 "data": ""
             }))
             
         except Exception as e:
+            logger.error(f"[WEBSOCKET] Error streaming text response for client {client_id}: {e}")
             await websocket.send_text(json.dumps({
+                "session": "text",
                 "type": "error",
                 "error": str(e)
             }))
@@ -493,11 +467,27 @@ class WebSocketServer:
             return
             
         try:
+            # Cancel text streaming task
+            if client_id in self.client_text_tasks:
+                text_task = self.client_text_tasks[client_id]
+                if not text_task.done():
+                    text_task.cancel()
+                    try:
+                        await text_task
+                    except asyncio.CancelledError:
+                        pass
+                del self.client_text_tasks[client_id]
+            
             agent_runner = self.client_runners[client_id]
             await agent_runner.end_text_conversation()
             self.client_text_sessions[client_id] = False
             logger.info(f"[WEBSOCKET] Text session stopped for client {client_id}")
-            
+
+            websocket = self.client_websockets[client_id]
+            await websocket.send_text(json.dumps({
+                "type": "text_session_ended",
+            }))
+
         except Exception as e:
             logger.error(f"[WEBSOCKET] Error stopping text session for client {client_id}: {e}")
 
@@ -508,10 +498,6 @@ class WebSocketServer:
             data = message.get("data", "")
             if data:
                 audio_bytes = base64.b64decode(data)
-                
-                # Capture audio for debugging
-                if client_id in self.client_audio_buffers:
-                    self.client_audio_buffers[client_id].append(audio_bytes)
                 
                 detector = self.client_wake_word_detectors.get(client_id)
                 if detector:
@@ -552,37 +538,128 @@ class WebSocketServer:
         except Exception as e:
             logger.error(f"[WEBSOCKET] Failed to start wake word detection for client {client_id}: {e}")
 
-    async def _route_session_message(self, client_id: str, message: dict):
+    async def _route_voice_session_message(self, client_id: str, message: dict):
         """Route messages to appropriate active session for a specific client"""
         
         agent_runner = self.client_runners[client_id]
+        
+        await agent_runner.send_voice_content(message)
+    
+    async def _route_text_session_message(self, client_id: str, message: dict):
+        """Continue active text conversation for a specific client"""
+        agent_runner = self.client_runners[client_id]
+        websocket = self.client_websockets[client_id]
             
-        mime_type = message.get("mime_type", "")
-        data = message.get("data", "")
+        msg = message.get("text", "")
 
-        decoded_data = base64.b64decode(data)
-        
-        # Capture audio for debugging if this is audio data
-        if message.get("type") == "audio" and client_id in self.client_audio_buffers:
-            self.client_audio_buffers[client_id].append(decoded_data)
-        
-        agent_runner.voice_live_request_queue.send_realtime(Blob(data=decoded_data, mime_type=mime_type))
+        try:
+            # Check if text session is active
+            if not self.client_text_sessions.get(client_id, False):
+                await websocket.send_text(json.dumps({
+                    "session": "text",
+                    "type": "error", 
+                    "error": "No active text session. Start a session with 'text_action' first."
+                }))
+                return
+            
+            session_type = agent_runner.get_text_session_type()
+            logger.info(f"[WEBSOCKET] Continuing {session_type} conversation for client {client_id} with: {msg[:50]}...")
 
+            # Cancel any existing text streaming task
+            if client_id in self.client_text_tasks:
+                existing_task = self.client_text_tasks[client_id]
+                if not existing_task.done():
+                    existing_task.cancel()
+                    try:
+                        await existing_task
+                    except asyncio.CancelledError:
+                        pass
+            
+            # Continue the conversation
+            # Continue conversation with new message (just pass the user_query for continuing conversation)
+            async_gen = await agent_runner.continue_text_conversation(msg)
+            
+            # Stream the response back to client in background task
+            text_streaming_task = asyncio.create_task(
+                self._stream_text_response_from_generator(client_id, websocket, async_gen)
+            )
+            self.client_text_tasks[client_id] = text_streaming_task
+                
+        except Exception as e:
+            logger.error(f"[WEBSOCKET] Error routing text session message for client {client_id}: {e}")
+            await websocket.send_text(json.dumps({
+                "session": "text",
+                "type": "error",
+                "error": str(e)
+            }))
+
+    async def _save_audio_recording(self, client_id: str):
+        """Save recorded audio to WAV file for debugging purposes"""
+        import wave
+        try:
+            if client_id not in self.client_audio_buffers or not self.client_audio_buffers[client_id]:
+                logger.debug(f"[WEBSOCKET] No audio recorded for client {client_id}, skipping WAV file creation")
+                return
+
+            # Get recorded audio chunks and timestamps
+            audio_chunks = self.client_audio_buffers[client_id]
+            start_time = self.client_recording_start_time.get(client_id, datetime.datetime.now())
+
+            # Create filename with timestamp
+            timestamp_str = start_time.strftime("%Y%m%d_%H%M%S")
+            filename = f"audio_debug_client_{client_id[:8]}_{timestamp_str}.wav"
+
+            # Concatenate all audio chunks
+            audio_data = b''.join(audio_chunks)
+
+            if not audio_data:
+                logger.debug(f"[WEBSOCKET] Empty audio data for client {client_id}, skipping WAV file creation")
+                return
+
+            # Audio format assumptions based on Luna AI specs:
+            # 24kHz sample rate, 16-bit PCM, mono
+            sample_rate = 24000
+            channels = 1
+            sample_width = 2  # 16-bit = 2 bytes per sample
+
+            # Write WAV file
+            with wave.open(filename, 'wb') as wav_file:
+                wav_file.setnchannels(channels)
+                wav_file.setsampwidth(sample_width)
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(audio_data)
+
+            audio_duration = len(audio_data) / (sample_rate * channels * sample_width)
+            logger.info(f"[WEBSOCKET] Saved {audio_duration:.1f}s of audio for client {client_id} to {filename}")
+        except Exception as e:
+            logger.error(f"[WEBSOCKET] Error saving audio recording for client {client_id}: {e}")
 
     async def _cleanup_client(self, client_id: str):
         """Clean up all sessions for a specific client"""
         try:
-            # Save recorded audio to WAV file for debugging
-            await self._save_audio_recording(client_id)
-            
             # Stop voice session
             await self._handle_voice_session_stop(client_id)
             
             # Stop text session
             await self._handle_text_session_stop(client_id)
-            
+
             # Stop wake word detection
-            await self._stop_wake_word_detection(client_id)
+            if client_id in self.client_wake_word_detectors:
+                detector = self.client_wake_word_detectors[client_id]
+                detector.stop()
+                logger.info(f"[WEBSOCKET] Stopped wake word detector for client {client_id}")
+            
+            # Cancel wake word detection task
+            if client_id in self.client_wake_word_tasks:
+                task = self.client_wake_word_tasks[client_id]
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                del self.client_wake_word_tasks[client_id]
+                logger.info(f"[WEBSOCKET] Cancelled wake word detection task for client {client_id}")
             
             # Remove client references
             if client_id in self.client_websockets:
@@ -595,12 +672,10 @@ class WebSocketServer:
                 del self.client_voice_sessions[client_id]
             if client_id in self.client_text_sessions:
                 del self.client_text_sessions[client_id]
+            if client_id in self.client_text_tasks:
+                del self.client_text_tasks[client_id]
             if client_id in self.client_wake_word_detectors:
                 del self.client_wake_word_detectors[client_id]
-            if client_id in self.client_audio_buffers:
-                del self.client_audio_buffers[client_id]
-            if client_id in self.client_recording_start_time:
-                del self.client_recording_start_time[client_id]
             
             # Remove from websocket communication util
             remove_websocket_connection(client_id)
@@ -610,46 +685,7 @@ class WebSocketServer:
         except Exception as e:
             logger.error(f"[WEBSOCKET] Error during cleanup for client {client_id}: {e}")
 
-    async def _save_audio_recording(self, client_id: str):
-        """Save recorded audio to WAV file for debugging purposes"""
-        try:
-            if client_id not in self.client_audio_buffers or not self.client_audio_buffers[client_id]:
-                logger.debug(f"[WEBSOCKET] No audio recorded for client {client_id}, skipping WAV file creation")
-                return
-            
-            # Get recorded audio chunks and timestamps
-            audio_chunks = self.client_audio_buffers[client_id]
-            start_time = self.client_recording_start_time.get(client_id, datetime.datetime.now())
-            
-            # Create filename with timestamp
-            timestamp_str = start_time.strftime("%Y%m%d_%H%M%S")
-            filename = f"audio_debug_client_{client_id[:8]}_{timestamp_str}.wav"
-            
-            # Concatenate all audio chunks
-            audio_data = b''.join(audio_chunks)
-            
-            if not audio_data:
-                logger.debug(f"[WEBSOCKET] Empty audio data for client {client_id}, skipping WAV file creation")
-                return
-            
-            # Audio format assumptions based on Luna AI specs:
-            # 24kHz sample rate, 16-bit PCM, mono (from copilot instructions)
-            sample_rate = 24000
-            channels = 1
-            sample_width = 2  # 16-bit = 2 bytes per sample
-            
-            # Write WAV file
-            with wave.open(filename, 'wb') as wav_file:
-                wav_file.setnchannels(channels)
-                wav_file.setsampwidth(sample_width)
-                wav_file.setframerate(sample_rate)
-                wav_file.writeframes(audio_data)
-            
-            audio_duration = len(audio_data) / (sample_rate * channels * sample_width)
-            logger.info(f"[WEBSOCKET] Saved {audio_duration:.1f}s of audio for client {client_id} to {filename}")
-            
-        except Exception as e:
-            logger.error(f"[WEBSOCKET] Error saving audio recording for client {client_id}: {e}")
+
 
     async def start_server(self, host: str = "0.0.0.0", port: int = None):
         """Start the FastAPI server with deployment-ready defaults"""

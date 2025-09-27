@@ -8,9 +8,9 @@ from google.adk.tools import ToolContext
 
 from ...util.websocket_communication import send_websocket_command
 
-async def save_reminder(title: str, description: str, trigger_time: str, repeat_pattern: Optional[str], tool_context: ToolContext) -> Dict[str, Any]:
+async def save_reminder(tool_context: ToolContext, title: str, description: str, trigger_time: str, repeat_pattern: Optional[str] = None) -> Dict[str, Any]:
     """
-    Create a new reminder for the user that will trigger at the specified time.
+    Create a new reminder for the user that will trigger at the specified time. If a repeat pattern is not explicitly stated (e.g. weekly), assume the user means a one-shot reminder.
     
     Use this tool when the user asks you to remind them of something at a specific time.
     IMPORTANT: Always call get_current_datetime() first to get the current time as reference

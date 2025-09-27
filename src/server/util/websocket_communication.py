@@ -51,26 +51,22 @@ def handle_websocket_response(client_id: str, response_data: Dict[str, Any]):
         logger.error(f"[WEBSOCKET] Received null response data for client {client_id}")
         return
     
-    if client_id not in _client_pending_responses and client_id not in _client_mcp_queues:
-        logger.warning(f"[WEBSOCKET] No pending responses or MCP queue for client {client_id}")
-        return
-    
     message_type = response_data.get("type", "")
+    payload = response_data.get("payload", "")
+
+    if "response" in message_type:
+        request_id = payload.get("request_id")
+        data = payload.get("data", {})
     
-    if message_type == "mcp_response":
-        logger.info(f"[WEBSOCKET] MCP response received for client {client_id}: {response_data}")
-        if client_id in _client_mcp_queues:
-            asyncio.create_task(_client_mcp_queues[client_id].put(response_data))
-        else:
-            logger.error(f"[WEBSOCKET] No MCP queue for client {client_id}")
-        return
-    
-    request_id = response_data.get("request_id")
-    
-    if request_id and request_id in _client_pending_responses[client_id]:
-        future = _client_pending_responses[client_id].pop(request_id)
-        if not future.done():
-            future.set_result(response_data)
+        if message_type == "mcp_response" and data is not None:
+            logger.info(f"[WEBSOCKET] MCP response received for client {client_id}: {data}")
+            asyncio.create_task(_client_mcp_queues[client_id].put(data))
+            return
+        
+        if request_id and request_id in _client_pending_responses[client_id]:
+            future = _client_pending_responses[client_id].pop(request_id)
+            if not future.done():
+                future.set_result(data)
 
 async def send_websocket_command(command_type: str, action: str, data: Optional[Dict[str, Any]] = None, client_id: str = None) -> Dict[str, Any]:
     """
@@ -89,19 +85,8 @@ async def send_websocket_command(command_type: str, action: str, data: Optional[
     """
     global _client_websockets, _client_pending_responses
 
-    # client_id is now required (from ToolContext)
-    if not client_id:
-        return {"status": "error", "message": "client_id is required (from ToolContext)"}
-
-    if client_id not in _client_websockets:
-        return {"status": "error", "message": f"No WebSocket connection available for client {client_id}"}
-
     websocket = _client_websockets[client_id]
     request_id = str(uuid.uuid4())
-
-    # Start timing
-    operation_start = asyncio.get_event_loop().time()
-    logger.info(f"[{client_id}] Starting {action} operation: {request_id}")
 
     message = {
         "type": command_type,
@@ -110,64 +95,25 @@ async def send_websocket_command(command_type: str, action: str, data: Optional[
         "request_id": request_id
     }
 
-    # For 'list', 'search', 'read', and 'get' actions, wait for response
-    if action in ['list', 'search', 'read', 'get']:
-        future = asyncio.Future()
-        _client_pending_responses[client_id][request_id] = future
+    future = asyncio.Future()
+    _client_pending_responses[client_id][request_id] = future
 
-        try:
-            # Time the JSON serialization
-            json_start = asyncio.get_event_loop().time()
-            message_json = json.dumps(message)
-            json_end = asyncio.get_event_loop().time()
+    try:
+        message_json = json.dumps(message)
 
-            # Time the WebSocket send
-            send_start = asyncio.get_event_loop().time()
-            await websocket.send_text(message_json)
-            send_end = asyncio.get_event_loop().time()
+        await websocket.send_text(message_json)
 
-            response = await asyncio.wait_for(future, timeout=15.0)
-            response_received = asyncio.get_event_loop().time()
-            total_time = response_received - operation_start
+        response = await asyncio.wait_for(future, timeout=15.0)
 
-            return response
-        except asyncio.TimeoutError:
-            timeout_time = asyncio.get_event_loop().time()
-            total_time = timeout_time - operation_start
-            logger.warning(f"[{client_id}] {action} TIMEOUT after {total_time:.4f}s")
-            # Clean up the pending future
-            if request_id in _client_pending_responses[client_id]:
-                del _client_pending_responses[client_id][request_id]
-            return {"status": "error", "message": "Request timeout"}
-        except Exception as e:
-            error_time = asyncio.get_event_loop().time()
-            total_time = error_time - operation_start
-            logger.error(f"[{client_id}] {action} ERROR after {total_time:.4f}s: {e}")
-            # Clean up the pending future
-            if request_id in _client_pending_responses[client_id]:
-                del _client_pending_responses[client_id][request_id]
-            return {"status": "error", "message": str(e)}
-    else:
-        # Fire and forget for other actions
-        try:
-            # Time the JSON serialization
-            json_start = asyncio.get_event_loop().time()
-            message_json = json.dumps(message)
-            json_end = asyncio.get_event_loop().time()
-            json_time = json_end - json_start
+        return response
+    except Exception as e:
+        logger.error(f"[{client_id}] {action} ERROR: {e}")
 
-            # Time the WebSocket send
-            send_start = asyncio.get_event_loop().time()
-            await websocket.send_text(message_json)
-            send_end = asyncio.get_event_loop().time()
-            send_time = send_end - send_start
-            total_time = send_end - operation_start
-
-            return {"status": "success"}
-        except Exception as e:
-            error_time = asyncio.get_event_loop().time()
-            total_time = error_time - operation_start
-            return {"status": "error", "message": str(e)}
+        if request_id in _client_pending_responses[client_id]:
+            del _client_pending_responses[client_id][request_id]
+            
+        return {"status": "error", "message": str(e)}
+    
 
 def get_mcp_queue(client_id: str) -> Optional[asyncio.Queue]:
     """Get the MCP response queue for a specific client"""
