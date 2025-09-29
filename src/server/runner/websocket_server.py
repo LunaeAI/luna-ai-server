@@ -456,7 +456,11 @@ class WebSocketServer:
             await agent_runner.end_voice_conversation()
             self.client_voice_sessions[client_id] = False
             
-            logger.info(f"[WEBSOCKET] Voice session stopped for client {client_id}")
+            websocket = self.client_websockets[client_id]
+
+            await websocket.send_text(json.dumps({
+                "type": "voice_session_ended",
+            }))
             
         except Exception as e:
             logger.error(f"[WEBSOCKET] Error stopping voice session for client {client_id}: {e}")
