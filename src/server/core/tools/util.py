@@ -5,7 +5,7 @@ Core utility functions and tool coordination
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Import tools from separate modules
 from .memory_tools import memory_tools
@@ -17,23 +17,27 @@ logger = logging.getLogger(__name__)
 
 def get_current_datetime() -> str:
     """
-    Get the current date and time in ISO format using the system's local timezone.
+    Get the current date and time in UTC timezone for reminder scheduling.
     Use this tool whenever you need to know the current time for scheduling reminders,
     calculating relative times (like "in 2 hours", "tomorrow", "next week"), or 
     understanding temporal context.
     
+    IMPORTANT: This returns UTC time for consistency with reminder system requirements.
+    When creating reminders, use this UTC time as your base and add time offsets to get 
+    the trigger_time in the correct "YYYY-MM-DDTHH:MM:SSZ" format.
+    
     Returns:
-        str: Current datetime in ISO format with local timezone (e.g., "2025-08-18T14:30:00-05:00")
+        str: Current datetime in UTC ISO format ending with 'Z' (e.g., "2025-08-18T19:30:00Z")
         
     Example:
-        - get_current_datetime() -> "2025-08-18T14:30:00-05:00"
-        - Use this as reference for "remind me in 2 hours" -> add 2 hours to this time
-        - Use this for "remind me tomorrow at 9 AM" -> next day at 9:00 AM
+        - get_current_datetime() -> "2025-08-18T19:30:00Z"
+        - For "remind me in 2 hours": add 2 hours to get "2025-08-18T21:30:00Z"
+        - For "remind me tomorrow at 9 AM UTC": next day at "2025-08-19T09:00:00Z"
     """
-    # Get current local time with timezone info
-    current_time = datetime.now()
-    # Return in ISO format with local timezone offset
-    return current_time.isoformat()
+    # Get current UTC time
+    current_time = datetime.now(timezone.utc)
+    # Return in UTC ISO format with 'Z' suffix
+    return current_time.isoformat().replace('+00:00', 'Z')
 
 def stop_streaming(function_name: str):
     """Stop the streaming

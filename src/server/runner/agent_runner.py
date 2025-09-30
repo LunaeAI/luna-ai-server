@@ -149,6 +149,8 @@ class AgentRunner:
             session_service=self.session_service,
             artifact_service=self.artifact_service
         )
+
+        self.pendingClose = False
         
         self.voice_live_request_queue = LiveRequestQueue()
         
@@ -428,7 +430,7 @@ class AgentRunner:
             for part in event.content.parts:
                 # Handle executable code generation
                 if hasattr(part, 'executable_code') and part.executable_code:
-                    code_snippet = getattr(part.executable_code, 'code', 'N/A')[:100]  # First 100 chars
+                    code_snippet = getattr(part.executable_code, 'code', 'N/A')  # First 100 chars
                     return {
                         "type": "log_only",
                         "log_message": f"CODE_GENERATED: {code_snippet}..."

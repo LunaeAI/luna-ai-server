@@ -3,9 +3,13 @@
 Workspace management tools for Luna AI Agent
 WebSocket-based communication with Electron main process
 """
+import json
 from typing import List, Dict, Any, Optional
 from google.adk.tools import ToolContext
 from ...util.websocket_communication import send_websocket_command
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def create_workspace(name: str, programs: Optional[List[str]] = None, description: Optional[str] = None, links: Optional[List[str]] = None, tool_context: ToolContext = None) -> Dict[str, Any]:
     """
@@ -35,24 +39,27 @@ async def create_workspace(name: str, programs: Optional[List[str]] = None, desc
     
     # Send command via WebSocket
     result = await send_websocket_command("workspace_request", "create", workspace_data, client_id)
+    logger.info(f"Create workspace result: {json.dumps(result)}")
     return result
 
-async def launch_workspace(name: str, tool_context: ToolContext = None) -> Dict[str, Any]:
+async def launch_workspace(id: str, tool_context: ToolContext = None) -> Dict[str, Any]:
     """
-    Launch an existing workspace by name.
+    Launch an existing workspace. You should call list_workspaces first to see the corresponding ID of the workspace the user wants to launch.
     
     Args:
-        name: Name of the workspace to launch
+        id: ID of the workspace to launch
         
     Returns:
         Dict containing launch results
     """
-    workspace_data = {"name": name}
+    workspace_data = {"id": id}
     
     client_id = tool_context.state.get("client_id") if tool_context else None
     
-    # Send command via WebSocket
     result = await send_websocket_command("workspace_request", "launch", workspace_data, client_id)
+
+    logger.info(f"Launch workspace result: {json.dumps(result)}")
+    
     return result
 
 async def list_workspaces(tool_context: ToolContext = None) -> Dict[str, Any]:
@@ -64,19 +71,11 @@ async def list_workspaces(tool_context: ToolContext = None) -> Dict[str, Any]:
     """
     client_id = tool_context.state.get("client_id") if tool_context else None
     
-    # Send command via WebSocket and wait for response
     result = await send_websocket_command("workspace_request", "list", {}, client_id)
+
+    logger.info(f"List workspaces result: {json.dumps(result)}")
     
-    if result.get("status") == "success":
-        # Return in the expected format with workspaces data
-        return {
-            "status": "success",
-            "workspaces": result.get("data", {}).get("workspaces", []),
-            "total": result.get("data", {}).get("total", 0),
-            "message": result.get("message", "Workspaces retrieved successfully")
-        }
-    else:
-        return result
+    return result
 
 async def search_workspaces(query: str, tool_context: ToolContext = None) -> Dict[str, Any]:
     """
@@ -92,20 +91,11 @@ async def search_workspaces(query: str, tool_context: ToolContext = None) -> Dic
     
     client_id = tool_context.state.get("client_id") if tool_context else None
     
-    # Send command via WebSocket and wait for response
     result = await send_websocket_command("workspace_request", "search", search_data, client_id)
+
+    logger.info(f"Search workspaces result: {json.dumps(result)}")
     
-    if result.get("status") == "success":
-        # Return in the expected format with search results
-        return {
-            "status": "success",
-            "query": query,
-            "workspaces": result.get("data", {}).get("workspaces", []),
-            "total": result.get("data", {}).get("total", 0),
-            "message": result.get("message", "Search completed successfully")
-        }
-    else:
-        return result
+    return result
 
 async def delete_workspace(name: str, tool_context: ToolContext = None) -> Dict[str, Any]:
     """
@@ -121,8 +111,10 @@ async def delete_workspace(name: str, tool_context: ToolContext = None) -> Dict[
     
     client_id = tool_context.state.get("client_id") if tool_context else None
     
-    # Send command via WebSocket
     result = await send_websocket_command("workspace_request", "delete", workspace_data, client_id)
+
+    logger.info(f"Delete workspace result: {json.dumps(result)}")
+
     return result
 
 async def clear_all_workspaces(tool_context: ToolContext = None) -> Dict[str, Any]:
@@ -134,33 +126,13 @@ async def clear_all_workspaces(tool_context: ToolContext = None) -> Dict[str, An
     """
     client_id = tool_context.state.get("client_id") if tool_context else None
     
-    # Send command via WebSocket
     result = await send_websocket_command("workspace_request", "clear_all", {}, client_id)
+
+    logger.info(f"Clear all workspaces result: {json.dumps(result)}")
+
     return result
 
-async def get_workspace_stats(tool_context: ToolContext = None) -> Dict[str, Any]:
-    """
-    Get statistics about the workspace database for debugging.
-    
-    Returns:
-        Dict containing workspace statistics
-    """
-    client_id = tool_context.state.get("client_id") if tool_context else None
-    
-    # Send command via WebSocket and wait for response
-    result = await send_websocket_command("workspace_request", "stats", {}, client_id)
-    
-    if result.get("status") == "success":
-        # Return in the expected format with stats data
-        return {
-            "status": "success",
-            "stats": result.get("data", {}),
-            "message": result.get("message", "Stats retrieved successfully")
-        }
-    else:
-        return result
 
-# Export workspace tools
 workspace_tools = [
     create_workspace,
     launch_workspace,
@@ -168,5 +140,4 @@ workspace_tools = [
     search_workspaces,
     delete_workspace,
     clear_all_workspaces,
-    get_workspace_stats
 ]

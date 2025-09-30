@@ -69,14 +69,14 @@ async def _log_tool_execution_async(
             _client_tool_counters[client_id] = 0
 
         _client_tool_counters[client_id] += 1
-        
-        if _client_tool_counters[client_id] >= 1: # TODO: Change this back to 10 for production.
+
+        if _client_tool_counters[client_id] >= 10:
             past_memories = await send_websocket_command("memory_request", "list", {"minConfidence": 0.1}, client_id)
             past_tools = await send_websocket_command("memory_request", "list_tool_logs", {}, client_id)
 
-            logger.info(f"Triggering behavior analysis for client {client_id} with {json.dumps(past_memories)} and {json.dumps(past_tools)}")
+            logger.info(f"Triggering behavior analysis for client {client_id}.")
 
-            asyncio.create_task(analyze_behavior(past_memories, past_tools, client_id))
+            asyncio.create_task(analyze_behavior(past_memories["data"], past_tools["data"], client_id))
             
             _client_tool_counters[client_id] = 0
 

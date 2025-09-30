@@ -9,16 +9,12 @@ from .websocket_communication import send_websocket_command
 
 logger = logging.getLogger(__name__)
 
-async def analyze_behavior(past_memories, past_tools, client_id):
+async def analyze_behavior(memories_data, tools_data, client_id):
     """
     Analyze user behavior based on past memories and tool usage.
     Formats data for analysis and sends analysis request via WebSocket.
     """
     try:
-        memories_data = past_memories["memories"]
-        tools_data = past_tools["executions"]
-        
-        # Create analysis data structure
         analysis_data = {
             "tool_executions": tools_data,
             "stored_memories": memories_data

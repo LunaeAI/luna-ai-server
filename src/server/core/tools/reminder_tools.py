@@ -3,10 +3,14 @@
 Reminder management tools for Luna AI Agent
 """
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from google.adk.tools import ToolContext
 
 from ...util.websocket_communication import send_websocket_command
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def save_reminder(tool_context: ToolContext, title: str, description: str, trigger_time: str, repeat_pattern: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -19,7 +23,7 @@ async def save_reminder(tool_context: ToolContext, title: str, description: str,
     Args:
         title: Brief title for the reminder (e.g., "call mom", "take medication")
         description: More detailed description of what to remind about
-        trigger_time: When to trigger the reminder in ISO 8601 format (e.g., "2025-08-18T18:00:00Z")
+        trigger_time: When to trigger the reminder in UTC ISO 8601 format ending with 'Z' (e.g., "2025-08-18T18:00:00Z")
         repeat_pattern: Optional repeat pattern: "daily", "weekly", "monthly", or None for one-shot
         tool_context: ADK ToolContext containing client_id in state
         
@@ -38,39 +42,35 @@ async def save_reminder(tool_context: ToolContext, title: str, description: str,
         - First call get_current_datetime() to get current time, then add 2 hours
         - save_reminder("check email", "Check email", "2025-08-18T16:30:00Z")
     """
+    client_id = tool_context.state.get("client_id")
+    
     try:
-        # Extract client_id from ToolContext
-        client_id = tool_context.state.get("client_id")
-        if not client_id:
-            return {"status": "error", "message": "Client ID not found in ToolContext"}
+        # Parse UTC ISO 8601 format (must end with 'Z')
+        if not trigger_time.endswith('Z'):
+            return {"status": "error", "message": "trigger_time must be in UTC format ending with 'Z' (e.g., '2025-08-18T18:00:00Z')"}
         
-        # Validate ISO 8601 format and check if time is in the future
-        try:
-            trigger_datetime = datetime.fromisoformat(trigger_time.replace('Z', '+00:00'))
-            current_datetime = datetime.now()
+        trigger_datetime = datetime.fromisoformat(trigger_time.replace('Z', '+00:00'))
+        current_datetime = datetime.now(timezone.utc)
+        
+        if not repeat_pattern and trigger_datetime <= current_datetime:
+            return {"status": "error", "message": "Cannot set reminder for a time in the past. Please choose a future date and time. Current time: " + current_datetime.isoformat() + ", Trigger time: " + trigger_time}
             
-            # For one-shot reminders, ensure the trigger time is in the future
-            if not repeat_pattern and trigger_datetime <= current_datetime:
-                return {"status": "error", "message": "Cannot set reminder for a time in the past. Please choose a future date and time."}
-                
-        except ValueError:
-            return {"status": "error", "message": "Invalid datetime format. Use ISO 8601 format (e.g., '2025-08-18T18:00:00Z')"}
-        
-        reminder_data = {
-            "title": title,
-            "description": description,
-            "trigger_time": trigger_time,
-            "type": "repeatable" if repeat_pattern else "one-shot",
-            "repeat_pattern": repeat_pattern,
-            "status": "active"
-        }
-        
-        # Send command via WebSocket with client_id
-        result = await send_websocket_command("reminder_request", "save", reminder_data, client_id)
-        return result
-            
-    except Exception as e:
-        return {"status": "error", "message": f"Failed to save reminder: {str(e)}"}
+    except ValueError:
+        return {"status": "error", "message": "Invalid datetime format. Use UTC ISO 8601 format ending with 'Z' (e.g., '2025-08-18T18:00:00Z')"}
+    
+    reminder_data = {
+        "title": title,
+        "description": description,
+        "trigger_time": trigger_time,
+        "type": "repeatable" if repeat_pattern else "one-shot",
+        "repeat_pattern": repeat_pattern,
+    }
+    
+    result = await send_websocket_command("reminder_request", "save", reminder_data, client_id)
+
+    logger.info(f"Save reminder result: {json.dumps(result)}")
+
+    return result
 
 
 async def get_reminders(tool_context: ToolContext) -> Dict[str, Any]:
@@ -100,28 +100,14 @@ async def get_reminders(tool_context: ToolContext) -> Dict[str, Any]:
             "created_at": "2025-08-18T10:00:00Z"
         }
     """
-    try:
-        # Extract client_id from ToolContext
-        client_id = tool_context.state.get("client_id")
-        if not client_id:
-            return {"status": "error", "message": "Client ID not found in ToolContext"}
-        
-        # Send command via WebSocket and wait for response
-        result = await send_websocket_command("reminder_request", "list", {}, client_id)
-        
-        if result.get("status") == "success":
-            # Return in the expected format with reminders data
-            return {
-                "status": "success",
-                "reminders": result.get("data", []),
-                "message": result.get("message", "Reminders retrieved successfully")
-            }
-        else:
-            return result
-            
-    except Exception as e:
-        return {"status": "error", "message": f"Failed to get reminders: {str(e)}"}
+    client_id = tool_context.state.get("client_id")
+    
+    result = await send_websocket_command("reminder_request", "list", {}, client_id)
 
+    logger.info(f"Get reminders result: {json.dumps(result)}")
+    
+    return result
+        
 
 async def update_reminder(reminder_id: str, updates: Dict[str, Any], original_reminder: Optional[Dict[str, Any]], tool_context: ToolContext) -> Dict[str, Any]:
     """
@@ -148,22 +134,18 @@ async def update_reminder(reminder_id: str, updates: Dict[str, Any], original_re
         - update_reminder("uuid-456", {"status": "inactive"})
     """
     try:
-        # Extract client_id from ToolContext
         client_id = tool_context.state.get("client_id")
-        if not client_id:
-            return {"status": "error", "message": "Client ID not found in ToolContext"}
-        
-        if not reminder_id:
-            return {"status": "error", "message": "Reminder ID is required"}
-        
-        # Validate trigger_time if it's being updated
+
         if "trigger_time" in updates:
             try:
-                trigger_datetime = datetime.fromisoformat(updates["trigger_time"].replace('Z', '+00:00'))
-                current_datetime = datetime.now()
+                # Parse UTC ISO 8601 format (must end with 'Z')
+                trigger_time_str = updates["trigger_time"]
+                if not trigger_time_str.endswith('Z'):
+                    return {"status": "error", "message": "trigger_time must be in UTC format ending with 'Z' (e.g., '2025-08-18T18:00:00Z')"}
                 
-                # For one-shot reminders, ensure the trigger time is in the future
-                # Check if this is a one-shot reminder using original reminder data
+                trigger_datetime = datetime.fromisoformat(trigger_time_str.replace('Z', '+00:00'))
+                current_datetime = datetime.now(timezone.utc)
+                
                 is_one_shot = (original_reminder and 
                              original_reminder.get("type") == "one-shot" and 
                              not original_reminder.get("repeat_pattern"))
@@ -172,15 +154,17 @@ async def update_reminder(reminder_id: str, updates: Dict[str, Any], original_re
                     return {"status": "error", "message": "Cannot set reminder for a time in the past. Please choose a future date and time."}
                     
             except ValueError:
-                return {"status": "error", "message": "Invalid datetime format. Use ISO 8601 format (e.g., '2025-08-18T18:00:00Z')"}
+                return {"status": "error", "message": "Invalid datetime format. Use UTC ISO 8601 format ending with 'Z' (e.g., '2025-08-18T18:00:00Z')"}
         
         request_data = {
             "reminder_id": reminder_id,
             "updates": updates
         }
         
-        # Send command via WebSocket with client_id
         result = await send_websocket_command("reminder_request", "update", request_data, client_id)
+
+        logger.info(f"Update reminder result: {json.dumps(result)}")
+
         return result
             
     except Exception as e:
@@ -207,18 +191,14 @@ async def delete_reminder(reminder_id: str, tool_context: ToolContext) -> Dict[s
         - delete_reminder("uuid-123")
     """
     try:
-        # Extract client_id from ToolContext
         client_id = tool_context.state.get("client_id")
-        if not client_id:
-            return {"status": "error", "message": "Client ID not found in ToolContext"}
         
-        if not reminder_id:
-            return {"status": "error", "message": "Reminder ID is required"}
+        request_data = {"id": reminder_id}
         
-        request_data = {"reminder_id": reminder_id}
-        
-        # Send command via WebSocket with client_id
         result = await send_websocket_command("reminder_request", "delete", request_data, client_id)
+
+        logger.info(f"Delete reminder result: {json.dumps(result)}")
+
         return result
             
     except Exception as e:

@@ -76,7 +76,7 @@ class ManagedBrowserSession:
         if self.client_id and self.context_id:
             try:
                 await send_websocket_command(
-                    command_type="browser",
+                    command_type="browser_request",
                     action="save",
                     data={"context_id": self.context_id},
                     client_id=self.client_id
@@ -87,6 +87,13 @@ class ManagedBrowserSession:
 
 # Global mapping to link BrowserSession instances to ManagedBrowserSession
 _SESSION_MAPPING = {}
+
+
+def _session_key_for(browser_session: BrowserSession | None) -> str | None:
+    """Return a stable session key for the given browser session."""
+    if browser_session is None:
+        return None
+    return browser_session.id
 
 BROWSER_SESSIONS = {} # TODO: Limit concurrent sessions based on tier.
 
@@ -232,7 +239,9 @@ async def start_browser_task(task: str, flash: bool, tool_context: ToolContext) 
 
         async with managed_session as browser_session:
             # Link browser_session to managed_session via global mapping
-            _SESSION_MAPPING[id(browser_session)] = managed_session
+            session_key = _session_key_for(browser_session)
+            if session_key:
+                _SESSION_MAPPING[session_key] = managed_session
 
             llm = ChatGoogle(model='gemini-2.5-flash')
 
@@ -291,8 +300,9 @@ async def start_browser_task(task: str, flash: bool, tool_context: ToolContext) 
 
             finally:
                 # Clean up session mapping
-                if id(browser_session) in _SESSION_MAPPING:
-                    del _SESSION_MAPPING[id(browser_session)]
+                session_key = _session_key_for(browser_session)
+                if session_key and session_key in _SESSION_MAPPING:
+                    del _SESSION_MAPPING[session_key]
 
                 del BROWSER_SESSIONS[managed_session.id]
     
@@ -326,7 +336,7 @@ async def create_context_and_session(tool_context: ToolContext):
     context_id = None
 
     response = await send_websocket_command(
-        command_type="browser",
+        command_type="browser_request",
         action="get",
         data={},
         client_id=tool_context.state.get("client_id")
@@ -357,7 +367,7 @@ async def create_context_and_session(tool_context: ToolContext):
     logger.info(f"Live View URL: {live_view.debuggerFullscreenUrl}")
 
     await send_websocket_command(
-        command_type="browser",
+        command_type="browser_request",
         action="live_url",
         data={"live_url": live_view.debuggerFullscreenUrl},
         client_id=tool_context.state.get("client_id")
@@ -374,8 +384,8 @@ async def wait_until_auth_completed(managed_session):
 def create_browser_controller():
     """Create a Browser-Use controller with authentication capabilities"""
     controller = Controller()
-    
-    @controller.action('Request user authentication for login pages.')
+
+    @controller.action('Request user manual intervention for login, sign up, or similar pages when you don\'t have access to login information.')
     async def request_user_authentication(browser_session: BrowserSession) -> ActionResult:
         """
         Custom action that requests user authentication when login is required.
@@ -383,15 +393,19 @@ def create_browser_controller():
         Args:
             browser_session: The current browser session
         """
-        # Get the managed session from the global mapping
-        managed_session = _SESSION_MAPPING.get(id(browser_session))
+        logger.info("Requesting user authentication action triggered.")
+        session_key = _session_key_for(browser_session)
+        managed_session = _SESSION_MAPPING.get(session_key)
         if not managed_session:
+            logger.info("No managed session found for the current browser session.")
             return ActionResult(
                 extracted_content="Unable to find managed session for authentication",
                 include_in_memory=True
             )
         
         managed_session.auth_needed = True
+
+        logger.info(f"Authentication needed set to True for session {managed_session.id}")
 
         try:
             await asyncio.wait_for(

@@ -7,6 +7,10 @@ from http import client
 from typing import Dict, Any, Optional
 from google.adk.tools import ToolContext
 from ...util.websocket_communication import send_websocket_command
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def save_memory(text: str, tool_context: ToolContext) -> Dict[str, Any]:
     """
@@ -26,13 +30,11 @@ async def save_memory(text: str, tool_context: ToolContext) -> Dict[str, Any]:
     
     client_id = tool_context.state.get("client_id")
     
-    # Send command via WebSocket
     result = await send_websocket_command("memory_request", "save", memory_data, client_id)
+
+    logger.info(f"Save memory result: {json.dumps(result)}")
     
-    if result.get("status") == "success":
-        return {"status": "success", "message": "Memory saved successfully"}
-    else:
-        return {"status": "error", "message": result.get("message", "Failed to save memory")}
+    return result
 
 async def get_all_memories(tool_context: ToolContext) -> Dict[str, Any]:
     """
@@ -45,17 +47,10 @@ async def get_all_memories(tool_context: ToolContext) -> Dict[str, Any]:
     client_id = tool_context.state.get("client_id")
     
     result = await send_websocket_command("memory_request", "list", {"minConfidence": 0.1}, client_id)
+
+    logger.info(f"Get all memories result: {json.dumps(result)}")
     
-    if result.get("status") == "success":
-        # Return in the expected format with memories data
-        return {
-            "status": "success",
-            "memories": result.get("data", {}).get("memories", []),
-            "count": result.get("data", {}).get("total", 0),
-            "message": result.get("message", "Memories retrieved successfully")
-        }
-    else:
-        return {"status": "error", "message": result.get("message", "Failed to retrieve memories"), "memories": []}
+    return result
 
 async def modify_memory(memory_id: str, new_text: Optional[str], new_confidence: Optional[float], tool_context: ToolContext) -> Dict[str, Any]:
     """
@@ -69,10 +64,8 @@ async def modify_memory(memory_id: str, new_text: Optional[str], new_confidence:
     Returns:
         dict: {"status": "success|error", "message": Optional[error_message]}
     """
-    if new_confidence is not None and (new_confidence < 0.0 or new_confidence > 1.0):
-        return {"status": "error", "message": "Confidence must be between 0.0 and 1.0"}
-    
     updates = {}
+
     if new_text is not None:
         updates["text"] = new_text
     if new_confidence is not None:
@@ -88,13 +81,11 @@ async def modify_memory(memory_id: str, new_text: Optional[str], new_confidence:
     
     client_id = tool_context.state.get("client_id")
     
-    # Send command via WebSocket
     result = await send_websocket_command("memory_request", "update", memory_data, client_id)
+
+    logger.info(f"Modify memory result: {json.dumps(result)}")
     
-    if result.get("status") == "success":
-        return {"status": "success", "message": f"Memory {memory_id} updated successfully"}
-    else:
-        return {"status": "error", "message": result.get("message", "Failed to update memory")}
+    return result
 
 async def reinforce_memory(memory_id: str, factor: Optional[float], tool_context: ToolContext) -> Dict[str, Any]:
     """
@@ -107,7 +98,6 @@ async def reinforce_memory(memory_id: str, factor: Optional[float], tool_context
     Returns:
         dict: {"status": "success|error", "message": Optional[error_message]}
     """
-    # Use default value if not provided
     if factor is None:
         factor = 0.1
         
@@ -118,11 +108,13 @@ async def reinforce_memory(memory_id: str, factor: Optional[float], tool_context
     
     client_id = tool_context.state.get("client_id")
     
-    # Send command via WebSocket
     result = await send_websocket_command("memory_request", "reinforce", memory_data, client_id)
+
+    logger.info(f"Reinforce memory result: {json.dumps(result)}")
+
     return result
 
-async def weaken_memory(memory_id: str, factor: Optional[float], auto_cleanup_threshold: Optional[float], tool_context: ToolContext) -> Dict[str, Any]:
+async def weaken_memory(memory_id: str, factor: Optional[float], tool_context: ToolContext) -> Dict[str, Any]:
     """
     Weaken a memory by decreasing its confidence.
     
@@ -134,22 +126,20 @@ async def weaken_memory(memory_id: str, factor: Optional[float], auto_cleanup_th
     Returns:
         dict: {"status": "success|error", "message": Optional[error_message]}
     """
-    # Use default values if not provided
     if factor is None:
-        factor = 0.2
-    if auto_cleanup_threshold is None:
-        auto_cleanup_threshold = 0.1
-        
+        factor = 0.1
+
     memory_data = {
         "id": memory_id,
         "factor": factor,
-        "autoCleanupThreshold": auto_cleanup_threshold
     }
     
     client_id = tool_context.state.get("client_id")
     
-    # Send command via WebSocket
     result = await send_websocket_command("memory_request", "weaken", memory_data, client_id)
+
+    logger.info(f"Weaken memory result: {json.dumps(result)}")
+
     return result
 
 async def delete_memory(memory_id: str, tool_context: ToolContext) -> Dict[str, Any]:
@@ -166,8 +156,10 @@ async def delete_memory(memory_id: str, tool_context: ToolContext) -> Dict[str, 
     
     client_id = tool_context.state.get("client_id")
     
-    # Send command via WebSocket
     result = await send_websocket_command("memory_request", "delete", memory_data, client_id)
+
+    logger.info(f"Delete memory result: {json.dumps(result)}")
+    
     return result
 
 async def clear_all_memories(tool_context: ToolContext) -> Dict[str, Any]:
@@ -179,8 +171,10 @@ async def clear_all_memories(tool_context: ToolContext) -> Dict[str, Any]:
     """
     client_id = tool_context.state.get("client_id")
     
-    # Send command via WebSocket
     result = await send_websocket_command("memory_request", "clear_all", {}, client_id)
+
+    logger.info(f"Clear all memories result: {json.dumps(result)}")
+
     return result
 
 memory_tools = [
