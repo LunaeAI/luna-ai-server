@@ -8,6 +8,7 @@ dependencies = [
     "bcrypt>=4.2.1",
     "browser-use==0.5.11",
     "colorama>=0.4.6",
+    "dotenv>=0.9.9",
     "fastapi>=0.116.1",
     "google-adk",
     "google-api-python-client>=2.181.0",
